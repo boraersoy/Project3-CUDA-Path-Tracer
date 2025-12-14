@@ -1,7 +1,7 @@
 #pragma once
 
 #include "intersections.h"
-
+#include <thrust/random.h>
 // CHECKITOUT
 /**
  * Computes a cosine-weighted random direction in a hemisphere.
@@ -41,6 +41,11 @@ glm::vec3 calculateRandomDirectionInHemisphere(
         + sin(around) * over * perpendicularDirection2;
 }
 
+__host__ __device__
+float luminance(const glm::vec3& c) {
+    return 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
+}
+
 /**
  * Scatter a ray with some probabilities according to the material properties.
  * For example, a diffuse surface scatters in a cosine-weighted hemisphere.
@@ -68,12 +73,42 @@ glm::vec3 calculateRandomDirectionInHemisphere(
  */
 __host__ __device__
 void scatterRay(
-        PathSegment & pathSegment,
-        glm::vec3 intersect,
-        glm::vec3 normal,
-        const Material &m,
-        thrust::default_random_engine &rng) {
-    // TODO: implement this.
-    // A basic implementation of pure-diffuse shading will just call the
-    // calculateRandomDirectionInHemisphere defined above.
+    PathSegment& pathSegment,
+    const ShadeableIntersection& intersection,
+    const Material& material,
+    thrust::default_random_engine& rng)
+{
+
+    // --- Light hit ---
+    if (material.emittance > 0.0f) {
+        pathSegment.color *= material.color * material.emittance;
+        pathSegment.remainingBounces = 0;
+        return;
+    }
+
+    glm::vec3 newDir;
+
+    // --- Specular ---
+    if (material.hasReflective) {
+        newDir = glm::reflect(pathSegment.ray.direction, intersection.surfaceNormal);
+        pathSegment.color *= material.specular.color;
+    }
+    // --- Diffuse ---
+    else {
+        newDir = calculateRandomDirectionInHemisphere(
+		intersection.surfaceNormal, rng);
+		pathSegment.color *= material.color;
+    }
+
+    // --- Spawn next ray ---
+    glm::vec3 hitPoint =
+        pathSegment.ray.origin + pathSegment.ray.direction * intersection.t;
+
+    const float EPS = 1e-4f;
+    pathSegment.ray.origin =
+        hitPoint + intersection.surfaceNormal * EPS;
+
+    pathSegment.ray.direction = glm::normalize(newDir);
+    pathSegment.remainingBounces--;
 }
+
