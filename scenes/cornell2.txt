@@ -95,7 +95,7 @@ SCALE       .01 10 10
 // Left wall
 OBJECT 4
 cube
-material 2
+material 4
 TRANS       -5 5 0
 ROTAT       0 0 0
 SCALE       .01 10 10
@@ -108,11 +108,18 @@ TRANS       5 5 0
 ROTAT       0 0 0
 SCALE       .01 10 10
 
-
-
+// Sphere
 OBJECT 6
+sphere
+material 4
+TRANS       -1 4 -1
+ROTAT       0 0 0
+SCALE       3 3 3
+
+//mesh
+OBJECT 7
 mesh
-models/Untitled.obj
+models/dodecahedron.obj
 material 4 
 TRANS 1 4 1
 ROTATE 0 0 0

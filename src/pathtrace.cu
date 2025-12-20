@@ -15,6 +15,7 @@
 #include "pathtrace.h"
 #include "intersections.h"
 #include "interactions.h"
+#include "objloader.h"
 
 #define ERRORCHECK 1
 
@@ -116,6 +117,10 @@ static Material* dev_materials = NULL;
 static PathSegment* dev_paths = NULL;
 static ShadeableIntersection* dev_intersections = NULL;
 static int* dev_materialKeys = nullptr;
+static Triangle* dev_triangle = nullptr;
+static int num_triangles = 1;
+
+
 
 #if CACHE_FIRST_BOUNCE
 static ShadeableIntersection* dev_firstBounceIntersections = nullptr;
@@ -152,12 +157,21 @@ void pathtraceInit(Scene* scene) {
 
 	// TODO: initialize any extra device memeory you need
 #if SORT_BY_MATERIAL
+
 	cudaMalloc(&dev_materialKeys, pixelcount * sizeof(int));
 #endif
 #if CACHE_FIRST_BOUNCE
 	cudaMalloc(&dev_firstBounceIntersections, pixelcount * sizeof(ShadeableIntersection));
 	first_bounce_cached = false;
 #endif
+	//create a single hardcoded triangle
+
+	num_triangles = (int)hst_scene->triangles.size();
+
+
+	cudaMalloc(&dev_triangle, num_triangles * sizeof(Triangle));
+	cudaMemcpy(dev_triangle, hst_scene->triangles.data() , num_triangles * sizeof(Triangle), cudaMemcpyHostToDevice);
+
 
 	checkCUDAError("pathtraceInit");
 }
@@ -176,7 +190,8 @@ void pathtraceFree() {
 	first_bounce_cached = false;
 #endif
 	// TODO: clean up any extra device memory you created
-
+	cudaFree(dev_triangle);
+	
 	checkCUDAError("pathtraceFree");
 }
 
@@ -216,70 +231,95 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
 // Generating new rays is handled in your shader(s).
 // Feel free to modify the code below.
 __global__ void computeIntersections(
-	int depth
-	, int num_paths
-	, PathSegment* pathSegments
-	, Geom* geoms
-	, int geoms_size
-	, ShadeableIntersection* intersections
-)
-{
+	int depth,
+	int num_paths,
+	PathSegment* pathSegments,
+	Geom* geoms,
+	int geoms_size,
+	ShadeableIntersection* intersections,
+	Triangle* dev_triangle
+) {
 	int path_index = blockIdx.x * blockDim.x + threadIdx.x;
+	if (path_index >= num_paths) return;
 
-	if (path_index < num_paths)
-	{
-		PathSegment pathSegment = pathSegments[path_index];
+	PathSegment& pathSegment = pathSegments[path_index];
 
-		float t;
-		glm::vec3 intersect_point;
-		glm::vec3 normal;
-		float t_min = FLT_MAX;
-		int hit_geom_index = -1;
-		bool outside = true;
+	float t_min = FLT_MAX;
+	int hit_materialId = -1;
+	glm::vec3 hit_normal;
 
-		glm::vec3 tmp_intersect;
-		glm::vec3 tmp_normal;
+	glm::vec3 tmp_intersect;
+	glm::vec3 tmp_normal;
+	bool outside = true;
 
-		// naive parse through global geoms
+	for (int i = 0; i < geoms_size; i++) {
+		Geom& geom = geoms[i];
 
-		for (int i = 0; i < geoms_size; i++)
-		{
-			Geom& geom = geoms[i];
+		if (geom.type == SPHERE) {
+			float t = sphereIntersectionTest(
+				geom,
+				pathSegment.ray,
+				tmp_intersect,
+				tmp_normal,
+				outside
+			);
 
-			if (geom.type == CUBE)
-			{
-				t = boxIntersectionTest(geom, pathSegment.ray, tmp_intersect, tmp_normal, outside);
-			}
-			else if (geom.type == SPHERE)
-			{
-				t = sphereIntersectionTest(geom, pathSegment.ray, tmp_intersect, tmp_normal, outside);
-			}
-			// TODO: add more intersection tests here... triangle? metaball? CSG?
-
-			// Compute the minimum t from the intersection tests to determine what
-			// scene geometry object was hit first.
-			if (t > 0.0f && t_min > t)
-			{
+			if (t > 0.0f && t < t_min) {
 				t_min = t;
-				hit_geom_index = i;
-				intersect_point = tmp_intersect;
-				normal = tmp_normal;
+				hit_normal = tmp_normal;
+				hit_materialId = geom.materialid;
 			}
 		}
 
-		if (hit_geom_index == -1)
-		{
-			intersections[path_index].t = -1.0f;
+		else if (geom.type == CUBE) {
+			float t = boxIntersectionTest(
+				geom,
+				pathSegment.ray,
+				tmp_intersect,
+				tmp_normal,
+				outside
+			);
+
+			if (t > 0.0f && t < t_min) {
+				t_min = t;
+				hit_normal = tmp_normal;
+				hit_materialId = geom.materialid;
+			}
 		}
-		else
-		{
-			//The ray hits something
-			intersections[path_index].t = t_min;
-			intersections[path_index].materialId = geoms[hit_geom_index].materialid;
-			intersections[path_index].surfaceNormal = normal;
+
+		else if (geom.type == MESH) {
+			int start = geom.triStart;
+			int end = start + geom.triCount;
+
+			for (int j = start; j < end; j++) {
+				float t = triangleIntersectionTest(
+					dev_triangle[j],
+					geom,
+					pathSegment.ray,
+					tmp_intersect,
+					tmp_normal,
+					outside
+				);
+
+				if (t > 0.0f && t < t_min) {
+					t_min = t;
+					hit_normal = tmp_normal;
+					hit_materialId = geom.materialid;
+				}
+			}
 		}
 	}
+
+	if (hit_materialId < 0) {
+		intersections[path_index].t = -1.0f;
+		return;
+	}
+
+	intersections[path_index].t = t_min;
+	intersections[path_index].surfaceNormal = hit_normal;
+	intersections[path_index].materialId = hit_materialId;
 }
+
 
 
 __global__ void shadeMaterial(
@@ -443,7 +483,8 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 			dev_paths,
 			dev_geoms,
 			hst_scene->geoms.size(),
-			dev_intersections
+			dev_intersections,
+			dev_triangle
 			);
 		checkCUDAError("trace one bounce");
 		cudaDeviceSynchronize();

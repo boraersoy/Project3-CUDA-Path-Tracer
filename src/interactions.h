@@ -92,6 +92,8 @@ void scatterRay(
     if (material.hasReflective) {
         newDir = glm::reflect(pathSegment.ray.direction, intersection.surfaceNormal);
         pathSegment.color *= material.specular.color;
+		//pathSegment.color *= glm::vec3(1.0f, 0.0f, 0.0f); // make reflective surfaces white
+       // pathSegment.remainingBounces = 0;
     }
     // --- Diffuse ---
     else {
@@ -113,41 +115,3 @@ void scatterRay(
 }
 
 
-__host__ __device__ void scatterRaySpecular(PathSegment& pathSegment,
-    const ShadeableIntersection& intersection,
-    const Material& material) {
-    glm::vec3 newDir = glm::reflect(pathSegment.ray.direction, intersection.surfaceNormal);
-    pathSegment.color *= material.specular.color;
-    // --- Spawn next ray ---
-    glm::vec3 hitPoint =
-        pathSegment.ray.origin + pathSegment.ray.direction * intersection.t;
-    const float EPS = 1e-4f;
-    pathSegment.ray.origin =
-        hitPoint + intersection.surfaceNormal * EPS;
-    pathSegment.ray.direction = glm::normalize(newDir);
-    pathSegment.remainingBounces--;
-}
-
-__host__ __device__ void scatterRayDiffuse(PathSegment& pathSegment,
-    const ShadeableIntersection& intersection,
-    const Material& material,
-    thrust::default_random_engine& rng) {
-    glm::vec3 newDir = calculateRandomDirectionInHemisphere(
-        intersection.surfaceNormal, rng);
-    pathSegment.color *= material.color;
-    // --- Spawn next ray ---
-    glm::vec3 hitPoint =
-        pathSegment.ray.origin + pathSegment.ray.direction * intersection.t;
-    const float EPS = 1e-4f;
-    pathSegment.ray.origin =
-        hitPoint + intersection.surfaceNormal * EPS;
-    pathSegment.ray.direction = glm::normalize(newDir);
-    pathSegment.remainingBounces--;
-}
-
-__host__ __device__ void scatterRayEmissive(PathSegment& pathSegment,
-    const ShadeableIntersection& intersection,
-    const Material& material) {
-    pathSegment.color *= material.color * material.emittance;
-    pathSegment.remainingBounces = 0;
-}

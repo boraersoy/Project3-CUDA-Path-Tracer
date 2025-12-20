@@ -142,3 +142,60 @@ __host__ __device__ float sphereIntersectionTest(Geom sphere, Ray r,
 
     return glm::length(r.origin - intersectionPoint);
 }
+
+__host__ __device__
+float triangleIntersectionTest(
+    const Triangle& tri,
+    const Geom& geom,
+    const Ray& r,
+    glm::vec3& intersectionPoint,
+    glm::vec3& normal,
+    bool& outside
+) {
+    // --- Transform ray to object space ---
+    glm::vec3 ro = multiplyMV(geom.inverseTransform, glm::vec4(r.origin, 1.0f));
+    glm::vec3 rd = glm::normalize(
+        multiplyMV(geom.inverseTransform, glm::vec4(r.direction, 0.0f))
+    );
+
+    Ray rt;
+    rt.origin = ro;
+    rt.direction = rd;
+
+    // --- Möller–Trumbore ---
+    const float EPS = 1e-7f;
+    glm::vec3 e1 = tri.v1 - tri.v0;
+    glm::vec3 e2 = tri.v2 - tri.v0;
+
+    glm::vec3 pvec = glm::cross(rt.direction, e2);
+    float det = glm::dot(e1, pvec);
+    if (fabs(det) < EPS) return -1.0f;
+
+    float invDet = 1.0f / det;
+    glm::vec3 tvec = rt.origin - tri.v0;
+    float u = glm::dot(tvec, pvec) * invDet;
+    if (u < 0.0f || u > 1.0f) return -1.0f;
+
+    glm::vec3 qvec = glm::cross(tvec, e1);
+    float v = glm::dot(rt.direction, qvec) * invDet;
+    if (v < 0.0f || u + v > 1.0f) return -1.0f;
+
+    float t = glm::dot(e2, qvec) * invDet;
+    if (t <= EPS) return -1.0f;
+
+    // --- Object-space hit ---
+    glm::vec3 objHit = rt.origin + t * rt.direction;
+
+    // --- Transform back to world ---
+    intersectionPoint =
+        multiplyMV(geom.transform, glm::vec4(objHit, 1.0f));
+
+    normal = glm::normalize(
+        multiplyMV(geom.invTranspose, glm::vec4(tri.normal, 0.0f))
+    );
+
+    outside = glm::dot(normal, r.direction) < 0.0f;
+    if (!outside) normal = -normal;
+
+    return glm::length(intersectionPoint - r.origin);
+}

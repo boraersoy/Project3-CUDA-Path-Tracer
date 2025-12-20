@@ -83,6 +83,8 @@ set(headers
     src/ImGui/imstb_rectpack.h
     src/ImGui/imstb_textedit.h
     src/ImGui/imstb_truetype.h
+    src/tiny_obj_loader.h
+    src/objloader.h
 )
 
 set(sources
@@ -101,6 +103,7 @@ set(sources
     src/ImGui/imgui_impl_opengl3.cpp
     src/ImGui/imgui_tables.cpp
     src/ImGui/imgui_widgets.cpp
+    src/objloader.cpp
 )
 
 list(SORT headers)
@@ -113,6 +116,7 @@ source_group(Sources FILES ${sources})
 # Build
 ########################################
 add_executable(${CMAKE_PROJECT_NAME} ${sources} ${headers})
+
 
 set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
