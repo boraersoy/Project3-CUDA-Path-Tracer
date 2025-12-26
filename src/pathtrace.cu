@@ -25,6 +25,7 @@
 
 #define SORT_BY_MATERIAL 1
 #define CACHE_FIRST_BOUNCE 0
+#define BBVH 1
 
 
 
@@ -119,6 +120,7 @@ static ShadeableIntersection* dev_intersections = NULL;
 static int* dev_materialKeys = nullptr;
 static Triangle* dev_triangle = nullptr;
 static int num_triangles = 1;
+static AABB* dev_aabb = nullptr;
 
 
 
@@ -172,7 +174,12 @@ void pathtraceInit(Scene* scene) {
 	cudaMalloc(&dev_triangle, num_triangles * sizeof(Triangle));
 	cudaMemcpy(dev_triangle, hst_scene->triangles.data() , num_triangles * sizeof(Triangle), cudaMemcpyHostToDevice);
 
-
+//allocate device memory for single mesh AABB
+#if BBVH
+//	num_aabbs = (int)hst_scene->aabbs.size();
+ cudaMalloc(&dev_aabb,  sizeof(AABB));
+ cudaMemcpy(dev_aabb, &hst_scene->aabbs, sizeof(AABB), cudaMemcpyHostToDevice);
+#endif BBVH
 	checkCUDAError("pathtraceInit");
 }
 
@@ -191,6 +198,9 @@ void pathtraceFree() {
 #endif
 	// TODO: clean up any extra device memory you created
 	cudaFree(dev_triangle);
+#if BBVH
+	cudaFree(dev_aabb);
+#endif
 	
 	checkCUDAError("pathtraceFree");
 }
@@ -237,7 +247,8 @@ __global__ void computeIntersections(
 	Geom* geoms,
 	int geoms_size,
 	ShadeableIntersection* intersections,
-	Triangle* dev_triangle
+	Triangle* dev_triangle,
+	AABB* dev_aabb
 ) {
 	int path_index = blockIdx.x * blockDim.x + threadIdx.x;
 	if (path_index >= num_paths) return;
@@ -252,9 +263,11 @@ __global__ void computeIntersections(
 	glm::vec3 tmp_normal;
 	bool outside = true;
 
+	// Loop over all geometry
 	for (int i = 0; i < geoms_size; i++) {
 		Geom& geom = geoms[i];
 
+		// -------- SPHERE --------
 		if (geom.type == SPHERE) {
 			float t = sphereIntersectionTest(
 				geom,
@@ -271,6 +284,7 @@ __global__ void computeIntersections(
 			}
 		}
 
+		// -------- CUBE --------
 		else if (geom.type == CUBE) {
 			float t = boxIntersectionTest(
 				geom,
@@ -287,10 +301,19 @@ __global__ void computeIntersections(
 			}
 		}
 
+		// -------- MESH --------
 		else if (geom.type == MESH) {
+			// 1️⃣ Mesh-level AABB culling (BOOLEAN ONLY)
+#if BBVH
+			if (!intersectAABB_bool(pathSegment.ray, dev_aabb[0], geom)) {
+				continue;
+			}
+#endif
+
 			int start = geom.triStart;
 			int end = start + geom.triCount;
 
+			// 2️⃣ Triangle tests
 			for (int j = start; j < end; j++) {
 				float t = triangleIntersectionTest(
 					dev_triangle[j],
@@ -310,6 +333,7 @@ __global__ void computeIntersections(
 		}
 	}
 
+	// -------- Write result --------
 	if (hit_materialId < 0) {
 		intersections[path_index].t = -1.0f;
 		return;
@@ -319,6 +343,9 @@ __global__ void computeIntersections(
 	intersections[path_index].surfaceNormal = hit_normal;
 	intersections[path_index].materialId = hit_materialId;
 }
+
+
+
 
 
 
@@ -424,8 +451,14 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 
 	generateRayFromCamera << <blocksPerGrid2d, blockSize2d >> > (cam, iter, traceDepth, dev_paths);
 	checkCUDAError("generate camera ray");
+	//print one rayfor debugging copy tracedepht to host first
+/*	glm::vec3 depth_debug_origin;
+	glm::vec3 depth_debug_direction;
+	cudaMemcpy(&depth_debug_direction, &dev_paths[0].ray.direction, sizeof(glm::vec3), cudaMemcpyDeviceToHost);
+	cudaMemcpy(&depth_debug_origin, &dev_paths[0].ray.origin, sizeof(glm::vec3), cudaMemcpyDeviceToHost);
 
-
+	printf("depth debug direction: %f, %f, %f\n", depth_debug_direction.x, depth_debug_direction.y, depth_debug_direction.z);
+	printf("depth debug origin: %f, %f, %f\n", depth_debug_origin.x, depth_debug_origin.y, depth_debug_origin.z)*/;
 	int depth = 0;
 	PathSegment* dev_path_end = dev_paths + pixelcount;
 	int num_paths = dev_path_end - dev_paths;
@@ -452,7 +485,9 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 					dev_paths,
 					dev_geoms,
 					hst_scene->geoms.size(),
-					dev_intersections
+					dev_intersections,
+					dev_triangle,
+					dev_aabb
 					);
 
 				// cache first bounce
@@ -484,7 +519,8 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 			dev_geoms,
 			hst_scene->geoms.size(),
 			dev_intersections,
-			dev_triangle
+			dev_triangle,
+			dev_aabb
 			);
 		checkCUDAError("trace one bounce");
 		cudaDeviceSynchronize();
@@ -579,4 +615,5 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 		pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
 
 	checkCUDAError("pathtrace");
+
 }

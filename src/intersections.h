@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <glm/glm.hpp>
 #include <glm/gtx/intersect.hpp>
@@ -143,59 +143,136 @@ __host__ __device__ float sphereIntersectionTest(Geom sphere, Ray r,
     return glm::length(r.origin - intersectionPoint);
 }
 
+
+__host__ __device__ float triangleIntersectionTest(const Triangle& tri,
+    const Geom& geom, const Ray& r, glm::vec3& intersectionPoint,
+    glm::vec3& normal, bool& outside)
+{
+	// --- Transform ray to object space ---
+	glm::vec3 ro = multiplyMV(geom.inverseTransform, glm::vec4(r.origin, 1.0f));
+	glm::vec3 rd = glm::normalize(
+		multiplyMV(geom.inverseTransform, glm::vec4(r.direction, 0.0f))
+	);
+
+	Ray rt;
+	rt.origin = ro;
+	rt.direction = rd;
+
+	// --- Möller–Trumbore ---
+	const float EPS = 1e-7f;
+	glm::vec3 e1 = tri.v1 - tri.v0;
+	glm::vec3 e2 = tri.v2 - tri.v0;
+
+	glm::vec3 pvec = glm::cross(rt.direction, e2);
+	float det = glm::dot(e1, pvec);
+	if (fabs(det) < EPS) return -1.0f;
+
+	float invDet = 1.0f / det;
+	glm::vec3 tvec = rt.origin - tri.v0;
+	float u = glm::dot(tvec, pvec) * invDet;
+	if (u < 0.0f || u > 1.0f) return -1.0f;
+
+	glm::vec3 qvec = glm::cross(tvec, e1);
+	float v = glm::dot(rt.direction, qvec) * invDet;
+	if (v < 0.0f || u + v > 1.0f) return -1.0f;
+
+	float t = glm::dot(e2, qvec) * invDet;
+	if (t <= EPS) return -1.0f;
+
+	// --- Object-space hit ---
+	glm::vec3 objHit = rt.origin + t * rt.direction;
+
+	// --- Transform back to world ---
+	intersectionPoint =
+		multiplyMV(geom.transform, glm::vec4(objHit, 1.0f));
+
+	normal = glm::normalize(
+		multiplyMV(geom.invTranspose, glm::vec4(tri.normal, 0.0f))
+	);
+
+	outside = glm::dot(normal, r.direction) < 0.0f;
+	if (!outside) normal = -normal;
+
+	return glm::length(intersectionPoint - r.origin);
+}
+
+__host__ __device__ bool intersectAABB(const Ray& ray, const AABB& box, 
+    float& tmin, float& tmax, const Geom& geom)
+{   
+	//transform ray to object space
+	glm::vec3 ro = multiplyMV(geom.inverseTransform, glm::vec4(ray.origin, 1.0f));
+	glm::vec3 rd = glm::normalize(multiplyMV(geom.inverseTransform, glm::vec4(ray.direction, 0.0f)));
+	
+    for (int axis = 0; axis < 3; axis++) {
+        float origin = ro[axis];
+        float dir = rd[axis];
+        float minB = box.min[axis];
+        float maxB = box.max[axis];
+
+
+		float invD = 1.0f / dir;
+		float t0 = (minB - origin) * invD;
+		float t1 = (maxB - origin) * invD;
+
+		if (t0 > t1) {
+			float tmp = t0; t0 = t1; t1 = tmp;
+		}
+
+		tmin = fmaxf(tmin, t0);
+		tmax = fminf(tmax, t1);
+
+		if (tmax < tmin)
+			return false;
+        
+    }
+    return true;
+}
+
+
 __host__ __device__
-float triangleIntersectionTest(
-    const Triangle& tri,
-    const Geom& geom,
-    const Ray& r,
-    glm::vec3& intersectionPoint,
-    glm::vec3& normal,
-    bool& outside
+bool intersectAABB_bool(
+    const Ray& ray,
+    const AABB& box,
+    const Geom& geom
 ) {
-    // --- Transform ray to object space ---
-    glm::vec3 ro = multiplyMV(geom.inverseTransform, glm::vec4(r.origin, 1.0f));
+    // Transform ray into object space
+    glm::vec3 ro = multiplyMV(geom.inverseTransform,
+        glm::vec4(ray.origin, 1.0f));
     glm::vec3 rd = glm::normalize(
-        multiplyMV(geom.inverseTransform, glm::vec4(r.direction, 0.0f))
-    );
+        multiplyMV(geom.inverseTransform,
+            glm::vec4(ray.direction, 0.0f)));
 
-    Ray rt;
-    rt.origin = ro;
-    rt.direction = rd;
+    float tmin = 0.0f;
+    float tmax = FLT_MAX;
 
-    // --- M�ller�Trumbore ---
-    const float EPS = 1e-7f;
-    glm::vec3 e1 = tri.v1 - tri.v0;
-    glm::vec3 e2 = tri.v2 - tri.v0;
+    // Slab test
+    for (int axis = 0; axis < 3; axis++) {
+        float origin = ro[axis];
+        float dir = rd[axis];
 
-    glm::vec3 pvec = glm::cross(rt.direction, e2);
-    float det = glm::dot(e1, pvec);
-    if (fabs(det) < EPS) return -1.0f;
+        // Parallel to slab → outside?
+        if (fabsf(dir) < 1e-8f) {
+            if (origin < box.min[axis] || origin > box.max[axis])
+                return false;
+            continue;
+        }
 
-    float invDet = 1.0f / det;
-    glm::vec3 tvec = rt.origin - tri.v0;
-    float u = glm::dot(tvec, pvec) * invDet;
-    if (u < 0.0f || u > 1.0f) return -1.0f;
+        float invD = 1.0f / dir;
+        float t0 = (box.min[axis] - origin) * invD;
+        float t1 = (box.max[axis] - origin) * invD;
 
-    glm::vec3 qvec = glm::cross(tvec, e1);
-    float v = glm::dot(rt.direction, qvec) * invDet;
-    if (v < 0.0f || u + v > 1.0f) return -1.0f;
+        if (t0 > t1) {
+            float tmp = t0; t0 = t1; t1 = tmp;
+        }
 
-    float t = glm::dot(e2, qvec) * invDet;
-    if (t <= EPS) return -1.0f;
+        // Shrink valid interval
+        tmin = fmaxf(tmin, t0);
+        tmax = fminf(tmax, t1);
 
-    // --- Object-space hit ---
-    glm::vec3 objHit = rt.origin + t * rt.direction;
+        // No overlap → miss
+        if (tmax < tmin)
+            return false;
+    }
 
-    // --- Transform back to world ---
-    intersectionPoint =
-        multiplyMV(geom.transform, glm::vec4(objHit, 1.0f));
-
-    normal = glm::normalize(
-        multiplyMV(geom.invTranspose, glm::vec4(tri.normal, 0.0f))
-    );
-
-    outside = glm::dot(normal, r.direction) < 0.0f;
-    if (!outside) normal = -normal;
-
-    return glm::length(intersectionPoint - r.origin);
+    return true;
 }

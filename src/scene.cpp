@@ -37,7 +37,7 @@ int Scene::loadGeom(string objectid) {
     int id = atoi(objectid.c_str());
 
     std::vector<Triangle> meshTriangles;
-
+	AABB meshAABB;
     if (id != geoms.size()) {
         cout << "ERROR: OBJECT ID does not match expected number of geoms" << endl;
         return -1;
@@ -73,7 +73,9 @@ int Scene::loadGeom(string objectid) {
                 string meshFile = tokens[0];
 				std::cout << "Loading mesh from file: " << meshFile << std::endl;
                 // Load raw triangles (object space)
-                bool success = loadOBJ(meshFile, meshTriangles);
+                bool success = loadOBJ(meshFile, meshTriangles, meshAABB);
+				std::cout << "meshaabb min: " << glm::to_string(meshAABB.min) << ", max: " << glm::to_string(meshAABB.max) << std::endl;
+                
                 if (!success) {
                     cout << "Failed to load mesh!" << endl;
                     return -1;
@@ -108,7 +110,7 @@ int Scene::loadGeom(string objectid) {
             }
 
             newGeom.transform = utilityCore::buildTransformationMatrix(
-                newGeom.translation, newGeom.rotation, newGeom.scale);
+            newGeom.translation, newGeom.rotation, newGeom.scale);
             newGeom.inverseTransform = glm::inverse(newGeom.transform);
             newGeom.invTranspose = glm::inverseTranspose(newGeom.transform);
 
@@ -123,6 +125,8 @@ int Scene::loadGeom(string objectid) {
                 newGeom.triCount = meshTriangles.size();
             }
             geoms.push_back(newGeom);
+            aabbs.min = meshAABB.min;
+			aabbs.max = meshAABB.max;
             return 1;
         }
     }

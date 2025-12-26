@@ -6,7 +6,8 @@
 
 bool loadOBJ(
     const std::string& path,
-    std::vector<Triangle>& outTriangles
+    std::vector<Triangle>& outTriangles,
+	AABB& outAABB
 ) {
     tinyobj::attrib_t attrib;
     std::vector<tinyobj::shape_t> shapes;
@@ -27,8 +28,14 @@ bool loadOBJ(
     if (!warn.empty()) std::cout << warn << std::endl;
     if (!err.empty())  std::cerr << err << std::endl;
 
+    outAABB.min = glm::vec3(FLT_MAX);
+    outAABB.max = glm::vec3(-FLT_MAX);
+
     for (const auto& shape : shapes) {
         size_t index_offset = 0;
+
+        glm::vec3 minBounds(FLT_MAX);
+        glm::vec3 maxBounds(-FLT_MAX);
 
         for (size_t f = 0; f < shape.mesh.num_face_vertices.size(); f++) {
             int fv = shape.mesh.num_face_vertices[f];
@@ -38,6 +45,7 @@ bool loadOBJ(
                 index_offset += fv;
                 continue;
             }
+
 
             Triangle tri;
 
@@ -53,6 +61,9 @@ bool loadOBJ(
                 if (v == 0) tri.v0 = pos;
                 if (v == 1) tri.v1 = pos;
                 if (v == 2) tri.v2 = pos;
+
+				minBounds = glm::min(minBounds, pos);
+				maxBounds = glm::max(maxBounds, pos);
             }
 
             tri.normal = glm::normalize(
@@ -61,8 +72,12 @@ bool loadOBJ(
 
             outTriangles.push_back(tri);
 
+			
+
             index_offset += fv;
         }
+        outAABB.min = minBounds;
+        outAABB.max = maxBounds;
     }
 
     return true;
