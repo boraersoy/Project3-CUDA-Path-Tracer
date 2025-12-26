@@ -119,8 +119,9 @@ static PathSegment* dev_paths = NULL;
 static ShadeableIntersection* dev_intersections = NULL;
 static int* dev_materialKeys = nullptr;
 static Triangle* dev_triangle = nullptr;
-static int num_triangles = 1;
+int num_triangles = 1;
 static AABB* dev_aabb = nullptr;
+int num_aabbs = 1;
 
 
 
@@ -176,9 +177,10 @@ void pathtraceInit(Scene* scene) {
 
 //allocate device memory for single mesh AABB
 #if BBVH
-//	num_aabbs = (int)hst_scene->aabbs.size();
- cudaMalloc(&dev_aabb,  sizeof(AABB));
- cudaMemcpy(dev_aabb, &hst_scene->aabbs, sizeof(AABB), cudaMemcpyHostToDevice);
+num_aabbs = (int)hst_scene->aabbs.size();
+std::cout << "number of aabbs: " << num_aabbs << std::endl;
+ cudaMalloc(&dev_aabb,  num_aabbs * sizeof(AABB));
+ cudaMemcpy(dev_aabb, hst_scene->aabbs.data(), num_aabbs * sizeof(AABB), cudaMemcpyHostToDevice);
 #endif BBVH
 	checkCUDAError("pathtraceInit");
 }
@@ -258,6 +260,7 @@ __global__ void computeIntersections(
 	float t_min = FLT_MAX;
 	int hit_materialId = -1;
 	glm::vec3 hit_normal;
+	int mesh_counter = 0;
 
 	glm::vec3 tmp_intersect;
 	glm::vec3 tmp_normal;
@@ -305,7 +308,8 @@ __global__ void computeIntersections(
 		else if (geom.type == MESH) {
 			// 1️⃣ Mesh-level AABB culling (BOOLEAN ONLY)
 #if BBVH
-			if (!intersectAABB_bool(pathSegment.ray, dev_aabb[0], geom)) {
+			if (!intersectAABB_bool(pathSegment.ray, dev_aabb[mesh_counter], geom)) {
+				mesh_counter++;
 				continue;
 			}
 #endif

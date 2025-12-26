@@ -23,6 +23,6 @@ public:
     std::vector<Geom> geoms;
     std::vector<Material> materials;
     std::vector<Triangle> triangles;
-	AABB aabbs;
+	std::vector<AABB> aabbs;
     RenderState state;
 };

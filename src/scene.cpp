@@ -75,7 +75,8 @@ int Scene::loadGeom(string objectid) {
                 // Load raw triangles (object space)
                 bool success = loadOBJ(meshFile, meshTriangles, meshAABB);
 				std::cout << "meshaabb min: " << glm::to_string(meshAABB.min) << ", max: " << glm::to_string(meshAABB.max) << std::endl;
-                
+                aabbs.push_back(meshAABB);
+
                 if (!success) {
                     cout << "Failed to load mesh!" << endl;
                     return -1;
@@ -125,10 +126,10 @@ int Scene::loadGeom(string objectid) {
                 newGeom.triCount = meshTriangles.size();
             }
             geoms.push_back(newGeom);
-            aabbs.min = meshAABB.min;
-			aabbs.max = meshAABB.max;
+
             return 1;
         }
+
     }
 }
 
