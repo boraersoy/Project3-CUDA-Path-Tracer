@@ -85,6 +85,8 @@ set(headers
     src/ImGui/imstb_truetype.h
     src/tiny_obj_loader.h
     src/objloader.h
+    src/octree.h
+    src/bvh.h
 )
 
 set(sources
@@ -104,6 +106,8 @@ set(sources
     src/ImGui/imgui_tables.cpp
     src/ImGui/imgui_widgets.cpp
     src/objloader.cpp
+    src/octree.cpp
+    src/bvh.cpp
 )
 
 list(SORT headers)

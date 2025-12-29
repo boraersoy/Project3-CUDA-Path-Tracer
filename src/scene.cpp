@@ -4,6 +4,8 @@
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtx/string_cast.hpp>
 #include "objloader.h"
+#include "octree.h"
+#include "bvh.h"
 
 Scene::Scene(string filename) {
     cout << "Reading scene from " << filename << " ..." << endl;
@@ -31,6 +33,26 @@ Scene::Scene(string filename) {
             }
         }
     }
+
+	////iterate triangles to compute their aabbs
+    for (const Triangle& t : triangles) {
+		AABB triAABB;
+		glm::vec3 min = glm::min(t.v0, glm::min(t.v1, t.v2));
+		glm::vec3 max = glm::max(t.v0, glm::max(t.v1, t.v2));
+		triAABB.min = min;
+		triAABB.max = max;
+		//std::cout << "Triangle AABB min: " << glm::to_string(triAABB.min) << ", max: " << glm::to_string(triAABB.max) << std::endl;
+		triangleAABBs.push_back(triAABB);
+	}
+	//build bvh
+
+	BVH bvh;
+	buildBVH(bvh, triangleAABBs, aabbs[0]);
+
+
+
+
+    
 }
 
 int Scene::loadGeom(string objectid) {

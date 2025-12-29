@@ -23,6 +23,8 @@ public:
     std::vector<Geom> geoms;
     std::vector<Material> materials;
     std::vector<Triangle> triangles;
-	std::vector<AABB> aabbs;
+	std::vector<AABB> aabbs; //mesh aabbs maybe change the name later
+	std::vector<AABB> triangleAABBs; //triangle aabbs for octree construction
+
     RenderState state;
 };
