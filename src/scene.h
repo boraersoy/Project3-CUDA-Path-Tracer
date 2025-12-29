@@ -7,6 +7,7 @@
 #include "glm/glm.hpp"
 #include "utilities.h"
 #include "sceneStructs.h"
+#include "bvh.h"
 
 using namespace std;
 
@@ -25,6 +26,8 @@ public:
     std::vector<Triangle> triangles;
 	std::vector<AABB> aabbs; //mesh aabbs maybe change the name later
 	std::vector<AABB> triangleAABBs; //triangle aabbs for octree construction
+
+	BVH cpubvh;
 
     RenderState state;
 };

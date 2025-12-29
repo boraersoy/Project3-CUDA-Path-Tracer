@@ -5,6 +5,9 @@
 
 #include "sceneStructs.h"
 #include "utilities.h"
+#include "bvh.h"
+
+#define MAX_TRIANGLES 1000000   // pick something safely above any scene
 
 /**
  * Handy-dandy hash function that provides seeds for random number generation.
@@ -196,41 +199,9 @@ __host__ __device__ float triangleIntersectionTest(const Triangle& tri,
 	return glm::length(intersectionPoint - r.origin);
 }
 
-__host__ __device__ bool intersectAABB(const Ray& ray, const AABB& box, 
-    float& tmin, float& tmax, const Geom& geom)
-{   
-	//transform ray to object space
-	glm::vec3 ro = multiplyMV(geom.inverseTransform, glm::vec4(ray.origin, 1.0f));
-	glm::vec3 rd = glm::normalize(multiplyMV(geom.inverseTransform, glm::vec4(ray.direction, 0.0f)));
-	
-    for (int axis = 0; axis < 3; axis++) {
-        float origin = ro[axis];
-        float dir = rd[axis];
-        float minB = box.min[axis];
-        float maxB = box.max[axis];
-
-
-		float invD = 1.0f / dir;
-		float t0 = (minB - origin) * invD;
-		float t1 = (maxB - origin) * invD;
-
-		if (t0 > t1) {
-			float tmp = t0; t0 = t1; t1 = tmp;
-		}
-
-		tmin = fmaxf(tmin, t0);
-		tmax = fminf(tmax, t1);
-
-		if (tmax < tmin)
-			return false;
-        
-    }
-    return true;
-}
-
 
 __host__ __device__
-bool intersectAABB_bool(
+bool intersectAABB(
     const Ray& ray,
     const AABB& box,
     const Geom& geom
@@ -276,3 +247,76 @@ bool intersectAABB_bool(
 
     return true;
 }
+
+__host__ __device__
+Hit traverseBVH(
+    const Ray& ray,
+    const BVHNodeGPU* nodes,
+    const int* triIndices,
+    const Triangle* triangles,
+    const Geom& geom
+) {
+    Hit h;
+    h.hit = false;
+    h.t = FLT_MAX;
+    h.triId = -1;
+
+    int stack[64];
+    int sp = 0;
+    stack[sp++] = 0;
+
+    while (sp > 0) {
+        int nodeIdx = stack[--sp];
+        if (nodeIdx < 0) continue; // 🔒 guard
+
+        const BVHNodeGPU& node = nodes[nodeIdx];
+
+        AABB box;
+        box.min = glm::vec3(node.bmin.x, node.bmin.y, node.bmin.z);
+        box.max = glm::vec3(node.bmax.x, node.bmax.y, node.bmax.z);
+
+        if (!intersectAABB(ray, box, geom))
+            continue;
+
+        if (node.triCount > 0) {
+            for (int i = 0; i < node.triCount; i++) {
+                int idx = node.triStart + i;
+                if ((unsigned)idx >= MAX_TRIANGLES) continue;
+
+                int triIdx = triIndices[idx];
+                if ((unsigned)triIdx >= MAX_TRIANGLES) continue;
+
+                glm::vec3 p, n;
+                bool outside;
+
+                float t = triangleIntersectionTest(
+                    triangles[triIdx],
+                    geom,
+                    ray,
+                    p,
+                    n,
+                    outside
+                );
+
+                if (t > 0.0f && t < h.t) {
+                    h.hit = true;
+                    h.t = t;
+                    h.triId = triIdx;
+                    h.position = p;
+                    h.normal = n;
+                    h.outside = outside;
+                }
+            }
+        }
+        else {
+            if (node.left >= 0 && sp < 63)
+                stack[sp++] = node.left;
+            if (node.right >= 0 && sp < 63)
+                stack[sp++] = node.right;
+        }
+    }
+
+    return h;
+}
+
+

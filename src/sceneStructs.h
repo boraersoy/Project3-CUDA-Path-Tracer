@@ -29,6 +29,16 @@ struct Ray {
     glm::vec3 direction;
 };
 
+struct Hit {
+    bool hit;
+    float t;                // WORLD distance
+    int triId;
+    glm::vec3 position;
+    glm::vec3 normal;
+    bool outside;
+};
+
+
 struct Geom {
     enum GeomType type;
     int materialid;

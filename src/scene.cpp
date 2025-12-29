@@ -46,8 +46,8 @@ Scene::Scene(string filename) {
 	}
 	//build bvh
 
-	BVH bvh;
-	buildBVH(bvh, triangleAABBs, aabbs[0]);
+	
+	buildBVH(cpubvh, triangleAABBs, aabbs[0]);
 
 
 

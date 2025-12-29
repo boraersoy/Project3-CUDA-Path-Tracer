@@ -14,6 +14,16 @@ struct BVHNode {
     int triCount;  // number of triangles in this node
 };
 
+struct BVHNodeGPU {
+    float3 bmin;
+    float3 bmax;
+    int left;
+    int right;
+    int triStart;
+    int triCount;
+};
+
+
 struct BVH {
     std::vector<BVHNode> nodes;
     std::vector<int> triangleIndices;

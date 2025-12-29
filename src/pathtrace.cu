@@ -26,7 +26,7 @@
 #define SORT_BY_MATERIAL 1
 #define CACHE_FIRST_BOUNCE 0
 #define BBVH 1
-
+#define MeshAABB 0
 
 
 void checkCUDAErrorFn(const char* msg, const char* file, int line) {
@@ -122,6 +122,8 @@ static Triangle* dev_triangle = nullptr;
 int num_triangles = 1;
 static AABB* dev_aabb = nullptr;
 int num_aabbs = 1;
+static BVHNodeGPU* dev_bvhNodes = nullptr;
+int* dev_triIndices = nullptr;
 
 
 
@@ -176,13 +178,46 @@ void pathtraceInit(Scene* scene) {
 	cudaMemcpy(dev_triangle, hst_scene->triangles.data() , num_triangles * sizeof(Triangle), cudaMemcpyHostToDevice);
 
 //allocate device memory for single mesh AABB
-#if BBVH
+#if MeshAABB
 num_aabbs = (int)hst_scene->aabbs.size();
 std::cout << "number of aabbs: " << num_aabbs << std::endl;
  cudaMalloc(&dev_aabb,  num_aabbs * sizeof(AABB));
  cudaMemcpy(dev_aabb, hst_scene->aabbs.data(), num_aabbs * sizeof(AABB), cudaMemcpyHostToDevice);
-#endif BBVH
+#endif MeshAABB
 	checkCUDAError("pathtraceInit");
+
+#if BBVH
+std::vector<BVHNodeGPU> gpuNodes(hst_scene->cpubvh.nodes.size());
+
+for (size_t i = 0; i < hst_scene->cpubvh.nodes.size(); i++) {
+	gpuNodes[i].bmin = make_float3(
+		hst_scene->cpubvh.nodes[i].bounds.min.x,
+		hst_scene->cpubvh.nodes[i].bounds.min.y,
+		hst_scene->cpubvh.nodes[i].bounds.min.z
+	);
+
+	gpuNodes[i].bmax = make_float3(
+		hst_scene->cpubvh.nodes[i].bounds.max.x,
+		hst_scene->cpubvh.nodes[i].bounds.max.y,
+		hst_scene->cpubvh.nodes[i].bounds.max.z
+	);
+	gpuNodes[i].left = hst_scene->cpubvh.nodes[i].left;
+	gpuNodes[i].right = hst_scene->cpubvh.nodes[i].right;
+	gpuNodes[i].triStart = hst_scene->cpubvh.nodes[i].triStart;
+	gpuNodes[i].triCount = hst_scene->cpubvh.nodes[i].triCount;
+}
+std::vector<int>& cpuTriIndices = hst_scene->cpubvh.triangleIndices;
+cudaMalloc(
+	&dev_bvhNodes,
+	gpuNodes.size() * sizeof(BVHNodeGPU)
+);
+
+cudaMalloc(
+	&dev_triIndices,
+	cpuTriIndices.size() * sizeof(int)
+);
+#endif BBVH
+checkCUDAError("BVH GPU node conversion");
 }
 
 void pathtraceFree() {
@@ -200,8 +235,12 @@ void pathtraceFree() {
 #endif
 	// TODO: clean up any extra device memory you created
 	cudaFree(dev_triangle);
-#if BBVH
+#if AABB
 	cudaFree(dev_aabb);
+#endif
+#if BBVH
+	cudaFree(dev_bvhNodes);
+	cudaFree(dev_triIndices);
 #endif
 	
 	checkCUDAError("pathtraceFree");
@@ -250,7 +289,11 @@ __global__ void computeIntersections(
 	int geoms_size,
 	ShadeableIntersection* intersections,
 	Triangle* dev_triangle,
-	AABB* dev_aabb
+	AABB* dev_aabb,
+#if BBVH
+	BVHNodeGPU* dev_bvhNodes,
+	int* dev_triIndices
+#endif
 ) {
 	int path_index = blockIdx.x * blockDim.x + threadIdx.x;
 	if (path_index >= num_paths) return;
@@ -260,17 +303,19 @@ __global__ void computeIntersections(
 	float t_min = FLT_MAX;
 	int hit_materialId = -1;
 	glm::vec3 hit_normal;
-	int mesh_counter = 0;
 
 	glm::vec3 tmp_intersect;
 	glm::vec3 tmp_normal;
 	bool outside = true;
+	int geomcount = 0;
 
-	// Loop over all geometry
+	// =========================================================
+	// 1️⃣ Analytic geometry (always brute-force)
+	// =========================================================
 	for (int i = 0; i < geoms_size; i++) {
 		Geom& geom = geoms[i];
+		geomcount++;
 
-		// -------- SPHERE --------
 		if (geom.type == SPHERE) {
 			float t = sphereIntersectionTest(
 				geom,
@@ -286,8 +331,6 @@ __global__ void computeIntersections(
 				hit_materialId = geom.materialid;
 			}
 		}
-
-		// -------- CUBE --------
 		else if (geom.type == CUBE) {
 			float t = boxIntersectionTest(
 				geom,
@@ -303,41 +346,64 @@ __global__ void computeIntersections(
 				hit_materialId = geom.materialid;
 			}
 		}
-
-		// -------- MESH --------
-		else if (geom.type == MESH) {
-			// 1️⃣ Mesh-level AABB culling (BOOLEAN ONLY)
-#if BBVH
-			if (!intersectAABB_bool(pathSegment.ray, dev_aabb[mesh_counter], geom)) {
-				mesh_counter++;
-				continue;
-			}
-#endif
-
-			int start = geom.triStart;
-			int end = start + geom.triCount;
-
-			// 2️⃣ Triangle tests
-			for (int j = start; j < end; j++) {
-				float t = triangleIntersectionTest(
-					dev_triangle[j],
-					geom,
-					pathSegment.ray,
-					tmp_intersect,
-					tmp_normal,
-					outside
-				);
-
-				if (t > 0.0f && t < t_min) {
-					t_min = t;
-					hit_normal = tmp_normal;
-					hit_materialId = geom.materialid;
-				}
-			}
-		}
 	}
 
-	// -------- Write result --------
+	// =========================================================
+	// 2️⃣ Mesh intersection
+	// =========================================================
+
+#if BBVH
+	// ---------- BVH traversal ----------
+	Hit h = traverseBVH(
+		pathSegment.ray,
+		dev_bvhNodes,
+		dev_triIndices,
+		dev_triangle,
+		geoms[geomcount]
+	);
+
+	if (h.hit && h.t < t_min) {
+		t_min = h.t;
+		hit_normal = h.normal;
+		hit_materialId = geoms[geomcount].materialid;
+	}
+
+#else
+	// ---------- Brute-force mesh path ----------
+	int mesh_counter = 0;
+
+	for (int i = 0; i < geoms_size; i++) {
+		Geom& geom = geoms[i];
+		if (geom.type != MESH) continue;
+
+
+		int start = geom.triStart;
+		int end = start + geom.triCount;
+
+		for (int j = start; j < end; j++) {
+			float t = triangleIntersectionTest(
+				dev_triangle[j],
+				geom,
+				pathSegment.ray,
+				tmp_intersect,
+				tmp_normal,
+				outside
+			);
+
+			if (t > 0.0f && t < t_min) {
+				t_min = t;
+				hit_normal = tmp_normal;
+				hit_materialId = geom.materialid;
+			}
+		}
+
+		mesh_counter++;
+	}
+#endif // BBVH
+
+	// =========================================================
+	// 3️⃣ Write result
+	// =========================================================
 	if (hit_materialId < 0) {
 		intersections[path_index].t = -1.0f;
 		return;
@@ -347,6 +413,7 @@ __global__ void computeIntersections(
 	intersections[path_index].surfaceNormal = hit_normal;
 	intersections[path_index].materialId = hit_materialId;
 }
+
 
 
 
@@ -492,6 +559,10 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 					dev_intersections,
 					dev_triangle,
 					dev_aabb
+#if BBVH
+					, dev_bvhNodes
+					, dev_triIndices
+#endif
 					);
 
 				// cache first bounce
@@ -525,6 +596,10 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 			dev_intersections,
 			dev_triangle,
 			dev_aabb
+#if BBVH
+			, dev_bvhNodes
+			, dev_triIndices
+#endif
 			);
 		checkCUDAError("trace one bounce");
 		cudaDeviceSynchronize();
