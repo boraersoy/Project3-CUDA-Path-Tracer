@@ -243,109 +243,72 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
 // Generating new rays is handled in your shader(s).
 // Feel free to modify the code below.
 __global__ void computeIntersections(
-	int depth,
-	int num_paths,
-	PathSegment* pathSegments,
-	Geom* geoms,
-	int geoms_size,
-	ShadeableIntersection* intersections,
-	Triangle* dev_triangle,
-	AABB* dev_aabb
-) {
+	int depth
+	, int num_paths
+	, PathSegment* pathSegments
+	, Geom* geoms
+	, Triangle* triangles
+	, int geoms_size
+	, ShadeableIntersection* intersections
+)
+{
 	int path_index = blockIdx.x * blockDim.x + threadIdx.x;
-	if (path_index >= num_paths) return;
 
-	PathSegment& pathSegment = pathSegments[path_index];
+	if (path_index < num_paths)
+	{
+		PathSegment pathSegment = pathSegments[path_index];
 
-	float t_min = FLT_MAX;
-	int hit_materialId = -1;
-	glm::vec3 hit_normal;
-	int mesh_counter = 0;
+		float t; // world space intersection distance along ray
+		glm::vec3 intersect_point;
+		glm::vec3 normal;
+		float t_min = FLT_MAX;
+		int hit_geom_index = -1; // what object this intersection hit. Index should be index in dev_geoms
+		bool outside = true; // if it hit outer surface of object or not. Not sure what to do if false
 
-	glm::vec3 tmp_intersect;
-	glm::vec3 tmp_normal;
-	bool outside = true;
+		glm::vec3 tmp_intersect;
+		glm::vec3 tmp_normal;
 
-	// Loop over all geometry
-	for (int i = 0; i < geoms_size; i++) {
-		Geom& geom = geoms[i];
 
-		// -------- SPHERE --------
-		if (geom.type == SPHERE) {
-			float t = sphereIntersectionTest(
-				geom,
-				pathSegment.ray,
-				tmp_intersect,
-				tmp_normal,
-				outside
-			);
+		for (int i = 0; i < geoms_size; i++)
+		{
+			Geom& geom = geoms[i];
 
-			if (t > 0.0f && t < t_min) {
+			if (geom.type == CUBE)
+			{
+				t = boxIntersectionTest(geom, pathSegment.ray, tmp_intersect, tmp_normal, outside);
+			}
+			else if (geom.type == SPHERE)
+			{
+				t = sphereIntersectionTest(geom, pathSegment.ray, tmp_intersect, tmp_normal, outside);
+			}
+			else if (geom.type == MESH) { // TODO: add more intersection tests here... triangle? metaball? CSG?
+
+				t = triangleMeshIntersectionTest(geom, triangles, pathSegment.ray, tmp_intersect, tmp_normal, outside);
+			}
+			// Compute the minimum t from the intersection tests to determine what
+			// scene geometry object was hit first.
+			if (t > 0.0f && t_min > t)
+			{
 				t_min = t;
-				hit_normal = tmp_normal;
-				hit_materialId = geom.materialid;
+				hit_geom_index = i;
+				intersect_point = tmp_intersect;
+				normal = tmp_normal;
+
 			}
 		}
 
-		// -------- CUBE --------
-		else if (geom.type == CUBE) {
-			float t = boxIntersectionTest(
-				geom,
-				pathSegment.ray,
-				tmp_intersect,
-				tmp_normal,
-				outside
-			);
-
-			if (t > 0.0f && t < t_min) {
-				t_min = t;
-				hit_normal = tmp_normal;
-				hit_materialId = geom.materialid;
-			}
+		if (hit_geom_index == -1)
+		{
+			intersections[path_index].t = -1.0f; // GUESSING: -1 means did not hit (raymarch didn't go anywhere?)
 		}
-
-		// -------- MESH --------
-		else if (geom.type == MESH) {
-			// 1️⃣ Mesh-level AABB culling (BOOLEAN ONLY)
-#if BBVH
-			if (!intersectAABB_bool(pathSegment.ray, dev_aabb[mesh_counter], geom)) {
-				mesh_counter++;
-				continue;
-			}
-#endif
-
-			int start = geom.triStart;
-			int end = start + geom.triCount;
-
-			// 2️⃣ Triangle tests
-			for (int j = start; j < end; j++) {
-				float t = triangleIntersectionTest(
-					dev_triangle[j],
-					geom,
-					pathSegment.ray,
-					tmp_intersect,
-					tmp_normal,
-					outside
-				);
-
-				if (t > 0.0f && t < t_min) {
-					t_min = t;
-					hit_normal = tmp_normal;
-					hit_materialId = geom.materialid;
-				}
-			}
+		else
+		{
+			//The ray hits something
+			intersections[path_index].t = t_min;
+			intersections[path_index].materialId = geoms[hit_geom_index].materialid;
+			intersections[path_index].surfaceNormal = normal;
 		}
 	}
-
-	// -------- Write result --------
-	if (hit_materialId < 0) {
-		intersections[path_index].t = -1.0f;
-		return;
-	}
-
-	intersections[path_index].t = t_min;
-	intersections[path_index].surfaceNormal = hit_normal;
-	intersections[path_index].materialId = hit_materialId;
 }
 
 
@@ -455,14 +418,6 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 
 	generateRayFromCamera << <blocksPerGrid2d, blockSize2d >> > (cam, iter, traceDepth, dev_paths);
 	checkCUDAError("generate camera ray");
-	//print one rayfor debugging copy tracedepht to host first
-/*	glm::vec3 depth_debug_origin;
-	glm::vec3 depth_debug_direction;
-	cudaMemcpy(&depth_debug_direction, &dev_paths[0].ray.direction, sizeof(glm::vec3), cudaMemcpyDeviceToHost);
-	cudaMemcpy(&depth_debug_origin, &dev_paths[0].ray.origin, sizeof(glm::vec3), cudaMemcpyDeviceToHost);
-
-	printf("depth debug direction: %f, %f, %f\n", depth_debug_direction.x, depth_debug_direction.y, depth_debug_direction.z);
-	printf("depth debug origin: %f, %f, %f\n", depth_debug_origin.x, depth_debug_origin.y, depth_debug_origin.z)*/;
 	int depth = 0;
 	PathSegment* dev_path_end = dev_paths + pixelcount;
 	int num_paths = dev_path_end - dev_paths;
@@ -488,10 +443,9 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 					num_paths,
 					dev_paths,
 					dev_geoms,
-					hst_scene->geoms.size(),
-					dev_intersections,
 					dev_triangle,
-					dev_aabb
+					hst_scene->geoms.size(),
+					dev_intersections
 					);
 
 				// cache first bounce
@@ -521,10 +475,9 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 			num_paths,
 			dev_paths,
 			dev_geoms,
-			hst_scene->geoms.size(),
-			dev_intersections,
 			dev_triangle,
-			dev_aabb
+			hst_scene->geoms.size(),
+			dev_intersections
 			);
 		checkCUDAError("trace one bounce");
 		cudaDeviceSynchronize();

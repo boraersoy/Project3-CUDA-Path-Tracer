@@ -196,41 +196,48 @@ __host__ __device__ float triangleIntersectionTest(const Triangle& tri,
 	return glm::length(intersectionPoint - r.origin);
 }
 
-__host__ __device__ bool intersectAABB(const Ray& ray, const AABB& box, 
-    float& tmin, float& tmax, const Geom& geom)
-{   
-	//transform ray to object space
-	glm::vec3 ro = multiplyMV(geom.inverseTransform, glm::vec4(ray.origin, 1.0f));
-	glm::vec3 rd = glm::normalize(multiplyMV(geom.inverseTransform, glm::vec4(ray.direction, 0.0f)));
-	
-    for (int axis = 0; axis < 3; axis++) {
-        float origin = ro[axis];
-        float dir = rd[axis];
-        float minB = box.min[axis];
-        float maxB = box.max[axis];
+__host__ __device__ float triangleMeshIntersectionTest(
+    const Geom& geom,
+    const Triangle* triangles,
+    const Ray& ray,
+    glm::vec3& out_intersect,
+    glm::vec3& out_normal,
+    bool& outside
+) {
+    float t_min = FLT_MAX;
+    bool hit = false;
 
+    glm::vec3 tmp_intersect;
+    glm::vec3 tmp_normal;
+    bool tmp_outside;
 
-		float invD = 1.0f / dir;
-		float t0 = (minB - origin) * invD;
-		float t1 = (maxB - origin) * invD;
+    int start = geom.triStart;
+    int end = start + geom.triCount;
 
-		if (t0 > t1) {
-			float tmp = t0; t0 = t1; t1 = tmp;
-		}
+    for (int i = start; i < end; i++) {
+        float t = triangleIntersectionTest(
+            triangles[i],
+            geom,
+            ray,
+            tmp_intersect,
+            tmp_normal,
+            tmp_outside
+        );
 
-		tmin = fmaxf(tmin, t0);
-		tmax = fminf(tmax, t1);
-
-		if (tmax < tmin)
-			return false;
-        
+        if (t > 0.0f && t < t_min) {
+            t_min = t;
+            out_intersect = tmp_intersect;
+            out_normal = tmp_normal;
+            outside = tmp_outside;
+            hit = true;
+        }
     }
-    return true;
+
+    return hit ? t_min : -1.0f;
 }
 
-
 __host__ __device__
-bool intersectAABB_bool(
+bool intersectAABB(
     const Ray& ray,
     const AABB& box,
     const Geom& geom
