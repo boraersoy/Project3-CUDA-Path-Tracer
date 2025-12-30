@@ -5,6 +5,7 @@
 
 #include "sceneStructs.h"
 #include "utilities.h"
+#include "bvh.h"
 
 /**
  * Handy-dandy hash function that provides seeds for random number generation.
@@ -240,24 +241,29 @@ __host__ __device__
 bool intersectAABB(
     const Ray& ray,
     const AABB& box,
-    const Geom& geom
+    const Geom& geom,
+    float tClosest
 ) {
     // Transform ray into object space
-    glm::vec3 ro = multiplyMV(geom.inverseTransform,
-        glm::vec4(ray.origin, 1.0f));
+    glm::vec3 ro = multiplyMV(
+        geom.inverseTransform,
+        glm::vec4(ray.origin, 1.0f)
+    );
+
     glm::vec3 rd = glm::normalize(
-        multiplyMV(geom.inverseTransform,
-            glm::vec4(ray.direction, 0.0f)));
+        multiplyMV(
+            geom.inverseTransform,
+            glm::vec4(ray.direction, 0.0f)
+        )
+    );
 
     float tmin = 0.0f;
-    float tmax = FLT_MAX;
+    float tmax = tClosest;  
 
-    // Slab test
     for (int axis = 0; axis < 3; axis++) {
         float origin = ro[axis];
         float dir = rd[axis];
 
-        // Parallel to slab → outside?
         if (fabsf(dir) < 1e-8f) {
             if (origin < box.min[axis] || origin > box.max[axis])
                 return false;
@@ -272,14 +278,95 @@ bool intersectAABB(
             float tmp = t0; t0 = t1; t1 = tmp;
         }
 
-        // Shrink valid interval
         tmin = fmaxf(tmin, t0);
         tmax = fminf(tmax, t1);
 
-        // No overlap → miss
+        //  EARLY EXIT if box is farther than current hit
         if (tmax < tmin)
             return false;
     }
 
     return true;
+}
+
+__device__ float traverseBVH(
+    const BVHNode* nodes,
+    const int* triIndices,
+    const Triangle* triangles,
+    const Geom& geom,
+    const Ray& ray,
+    glm::vec3& out_intersect,
+    glm::vec3& out_normal,
+    bool& out_outside
+) {
+    float tClosest = FLT_MAX;
+    bool hit = false;
+
+    // Fixed-size stack (safe upper bound)
+    int stack[64];
+    int stackPtr = 0;
+
+    // Root assumed at index 0
+    stack[stackPtr++] = 0;
+
+    while (stackPtr > 0) {
+
+        int nodeIdx = stack[--stackPtr];
+
+        // -------- index safety --------
+        if (nodeIdx < 0)
+            continue;
+
+        const BVHNode& node = nodes[nodeIdx];
+
+        // AABB test with early-out using current closest hit
+        if (!intersectAABB(ray, node.bounds, geom, tClosest))
+            continue;
+
+        // -------- leaf --------
+        if (node.left < 0 && node.right < 0) {
+
+            int start = node.triStart;
+            int end = start + node.triCount;
+
+            for (int i = start; i < end; i++) {
+
+                // triangle index safety
+                int triIdx = triIndices[i];
+                if (triIdx < 0)
+                    continue;
+
+                glm::vec3 tmpI, tmpN;
+                bool tmpOutside;
+
+                float t = triangleIntersectionTest(
+                    triangles[triIdx],
+                    geom,
+                    ray,
+                    tmpI,
+                    tmpN,
+                    tmpOutside
+                );
+
+                if (t > 0.0f && t < tClosest) {
+                    tClosest = t;
+                    out_intersect = tmpI;
+                    out_normal = tmpN;
+                    out_outside = tmpOutside;
+                    hit = true;
+                }
+            }
+        }
+        // -------- internal node --------
+        else {
+            // Push children (order does not affect correctness)
+            if (node.right >= 0 && stackPtr < 63)
+                stack[stackPtr++] = node.right;
+
+            if (node.left >= 0 && stackPtr < 63)
+                stack[stackPtr++] = node.left;
+        }
+    }
+
+    return hit ? tClosest : -1.0f;
 }

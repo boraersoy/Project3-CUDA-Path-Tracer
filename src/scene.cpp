@@ -46,8 +46,11 @@ Scene::Scene(string filename) {
 	}
 	//build bvh
 
-	BVH bvh;
-	buildBVH(bvh, triangleAABBs, aabbs[0]);
+	
+	buildBVH(cpubvh, triangleAABBs, aabbs[0]);
+	
+	std::cout << "BVH built with " << cpubvh.nodes.size() << " nodes." << std::endl;
+
 
 
 

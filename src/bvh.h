@@ -19,7 +19,7 @@ struct BVH {
     std::vector<int> triangleIndices;
 
     int maxDepth = 32;
-    int leafThreshold = 4;
+    int leafThreshold = 8;
 };
 
 // Entry point
