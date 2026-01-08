@@ -3,6 +3,7 @@
 #include "sceneStructs.h"
 #include <vector>
 #include <glm/glm.hpp>
+#include <iostream>
 
 struct BVHNode {
     AABB bounds;
@@ -19,8 +20,20 @@ struct BVH {
     std::vector<int> triangleIndices;
 
     int maxDepth = 32;
-    int leafThreshold = 8;
+    int leafThreshold = 16;
 };
+
+struct BVHStats {
+    int nodeCount = 0;
+    int leafCount = 0;
+    int internalCount = 0;
+    int maxDepth = 0;
+    int totalTriangles = 0;
+
+    int minLeafTris = INT_MAX;
+    int maxLeafTris = 0;
+};
+
 
 // Entry point
 void buildBVH(
@@ -46,9 +59,12 @@ AABB computeNodeBounds(
 
 int longestAxis(const AABB& box);
 
-__host__ __device__
-bool intersectAABB(
-    const AABB& box,
-    const glm::vec3& rayOrigin,
-    const glm::vec3& rayDir
+
+void printBVHStats(const BVH& bvh);
+
+void collectBVHStats(
+    const BVH& bvh,
+    int nodeIdx,
+    int depth,
+    BVHStats& stats
 );

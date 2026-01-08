@@ -197,6 +197,42 @@ __host__ __device__ float triangleIntersectionTest(const Triangle& tri,
 	return glm::length(intersectionPoint - r.origin);
 }
 
+__device__
+float triangleIntersection_ObjectSpace(
+    const Triangle& tri,
+    const Ray& rayOS,
+    glm::vec3& objHit,
+    glm::vec3& objNormal
+) {
+    const float EPS = 1e-7f;
+
+    glm::vec3 e1 = tri.v1 - tri.v0;
+    glm::vec3 e2 = tri.v2 - tri.v0;
+
+    glm::vec3 pvec = glm::cross(rayOS.direction, e2);
+    float det = glm::dot(e1, pvec);
+    if (fabs(det) < EPS) return -1.0f;
+
+    float invDet = 1.0f / det;
+    glm::vec3 tvec = rayOS.origin - tri.v0;
+
+    float u = glm::dot(tvec, pvec) * invDet;
+    if (u < 0.0f || u > 1.0f) return -1.0f;
+
+    glm::vec3 qvec = glm::cross(tvec, e1);
+    float v = glm::dot(rayOS.direction, qvec) * invDet;
+    if (v < 0.0f || u + v > 1.0f) return -1.0f;
+
+    float t = glm::dot(e2, qvec) * invDet;
+    if (t <= EPS) return -1.0f;
+
+    objHit = rayOS.origin + t * rayOS.direction;
+    objNormal = tri.normal;
+
+    return t; // OBJECT-SPACE t
+}
+
+
 __host__ __device__ float triangleMeshIntersectionTest(
     const Geom& geom,
     const Triangle* triangles,
@@ -239,30 +275,16 @@ __host__ __device__ float triangleMeshIntersectionTest(
 
 __host__ __device__
 bool intersectAABB(
-    const Ray& ray,
+    const Ray& rayOS,
     const AABB& box,
-    const Geom& geom,
     float tClosest
 ) {
-    // Transform ray into object space
-    glm::vec3 ro = multiplyMV(
-        geom.inverseTransform,
-        glm::vec4(ray.origin, 1.0f)
-    );
-
-    glm::vec3 rd = glm::normalize(
-        multiplyMV(
-            geom.inverseTransform,
-            glm::vec4(ray.direction, 0.0f)
-        )
-    );
-
     float tmin = 0.0f;
-    float tmax = tClosest;  
+    float tmax = tClosest;
 
     for (int axis = 0; axis < 3; axis++) {
-        float origin = ro[axis];
-        float dir = rd[axis];
+        float origin = rayOS.origin[axis];
+        float dir = rayOS.direction[axis];
 
         if (fabsf(dir) < 1e-8f) {
             if (origin < box.min[axis] || origin > box.max[axis])
@@ -281,7 +303,6 @@ bool intersectAABB(
         tmin = fmaxf(tmin, t0);
         tmax = fminf(tmax, t1);
 
-        //  EARLY EXIT if box is farther than current hit
         if (tmax < tmin)
             return false;
     }
@@ -289,24 +310,36 @@ bool intersectAABB(
     return true;
 }
 
+
 __device__ float traverseBVH(
     const BVHNode* nodes,
     const int* triIndices,
     const Triangle* triangles,
     const Geom& geom,
-    const Ray& ray,
+    const Ray& rayWS,
     glm::vec3& out_intersect,
     glm::vec3& out_normal,
     bool& out_outside
 ) {
+    // ---- cache object-space ray ONCE ----
+    Ray rayOS;
+    rayOS.origin = multiplyMV(
+        geom.inverseTransform,
+        glm::vec4(rayWS.origin, 1.0f)
+    );
+
+    rayOS.direction = glm::normalize(
+        multiplyMV(
+            geom.inverseTransform,
+            glm::vec4(rayWS.direction, 0.0f)
+        )
+    );
+
     float tClosest = FLT_MAX;
     bool hit = false;
 
-    // Fixed-size stack (safe upper bound)
     int stack[64];
     int stackPtr = 0;
-
-    // Root assumed at index 0
     stack[stackPtr++] = 0;
 
     while (stackPtr > 0) {
@@ -319,11 +352,10 @@ __device__ float traverseBVH(
 
         const BVHNode& node = nodes[nodeIdx];
 
-        // AABB test with early-out using current closest hit
-        if (!intersectAABB(ray, node.bounds, geom, tClosest))
+
+        if (!intersectAABB(rayOS, node.bounds, tClosest))
             continue;
 
-        // -------- leaf --------
         if (node.left < 0 && node.right < 0) {
 
             int start = node.triStart;
@@ -331,38 +363,39 @@ __device__ float traverseBVH(
 
             for (int i = start; i < end; i++) {
 
-                // triangle index safety
                 int triIdx = triIndices[i];
                 if (triIdx < 0)
                     continue;
 
-                glm::vec3 tmpI, tmpN;
-                bool tmpOutside;
+                glm::vec3 objHit, objNormal;
 
-                float t = triangleIntersectionTest(
+                float t = triangleIntersection_ObjectSpace(
                     triangles[triIdx],
-                    geom,
-                    ray,
-                    tmpI,
-                    tmpN,
-                    tmpOutside
+                    rayOS,
+                    objHit,
+                    objNormal
                 );
 
                 if (t > 0.0f && t < tClosest) {
                     tClosest = t;
-                    out_intersect = tmpI;
-                    out_normal = tmpN;
-                    out_outside = tmpOutside;
                     hit = true;
+
+                    // convert ONCE for final hit
+                    out_intersect =
+                        multiplyMV(geom.transform, glm::vec4(objHit, 1.0f));
+
+                    out_normal = glm::normalize(
+                        multiplyMV(geom.invTranspose, glm::vec4(objNormal, 0.0f))
+                    );
+
+                    out_outside = glm::dot(out_normal, rayWS.direction) < 0.0f;
+                    if (!out_outside) out_normal = -out_normal;
                 }
             }
         }
-        // -------- internal node --------
         else {
-            // Push children (order does not affect correctness)
             if (node.right >= 0 && stackPtr < 63)
                 stack[stackPtr++] = node.right;
-
             if (node.left >= 0 && stackPtr < 63)
                 stack[stackPtr++] = node.left;
         }

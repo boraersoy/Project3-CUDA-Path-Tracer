@@ -158,3 +158,62 @@ int longestAxis(const AABB& box) {
     return 2;
 }
 
+void collectBVHStats(
+    const BVH& bvh,
+    int nodeIdx,
+    int depth,
+    BVHStats& stats
+) {
+    const BVHNode& node = bvh.nodes[nodeIdx];
+
+    stats.nodeCount++;
+    stats.maxDepth = std::max(stats.maxDepth, depth);
+
+    bool isLeaf = (node.left == -1 && node.right == -1);
+
+    if (isLeaf) {
+        stats.leafCount++;
+        stats.totalTriangles += node.triCount;
+
+        stats.minLeafTris = std::min(stats.minLeafTris, node.triCount);
+        stats.maxLeafTris = std::max(stats.maxLeafTris, node.triCount);
+    }
+    else {
+        stats.internalCount++;
+
+        if (node.left >= 0)
+            collectBVHStats(bvh, node.left, depth + 1, stats);
+        if (node.right >= 0)
+            collectBVHStats(bvh, node.right, depth + 1, stats);
+    }
+}
+
+void printBVHStats(const BVH& bvh) {
+    BVHStats stats;
+    collectBVHStats(bvh, 0, 1, stats);
+
+    std::cout << "\nBVH Stats\n";
+    std::cout << "=========================\n";
+    std::cout << "Nodes total:        " << stats.nodeCount << "\n";
+    std::cout << "Internal nodes:     " << stats.internalCount << "\n";
+    std::cout << "Leaf nodes:         " << stats.leafCount << "\n";
+    std::cout << "Max depth:          " << stats.maxDepth << "\n";
+    std::cout << "Triangles total:    " << stats.totalTriangles << "\n";
+
+    if (stats.leafCount > 0) {
+        std::cout << "Avg tris / leaf:    "
+            << float(stats.totalTriangles) / stats.leafCount
+            << "\n";
+        std::cout << "Min tris / leaf:    " << stats.minLeafTris << "\n";
+        std::cout << "Max tris / leaf:    " << stats.maxLeafTris << "\n";
+    }
+
+    std::cout << "Triangle index buf: "
+        << bvh.triangleIndices.size() << "\n";
+
+    std::cout << "BVH memory:         "
+        << (bvh.nodes.size() * sizeof(BVHNode)
+            + bvh.triangleIndices.size() * sizeof(int))
+        / 1024.0f
+        << " KB\n";
+}

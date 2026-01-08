@@ -26,7 +26,7 @@
 
 #define SORT_BY_MATERIAL 1
 #define CACHE_FIRST_BOUNCE 0
-#define BBVH 1
+#define BBVH 0
 
 
 
