@@ -1,0 +1,7 @@
+OBJECT 6
+mesh
+models/standford/happybuddastatue100k.obj
+material 5 
+TRANS 0 -2 3
+ROTATE 0 0 0
+SCALE  30 30 30

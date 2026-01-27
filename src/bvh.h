@@ -34,6 +34,10 @@ struct BVHStats {
     int maxLeafTris = 0;
 };
 
+struct BVHTraverseStats {
+    unsigned long long nodeVisits;
+    unsigned long long triTests;
+};
 
 // Entry point
 void buildBVH(

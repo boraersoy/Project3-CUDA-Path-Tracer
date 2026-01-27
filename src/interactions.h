@@ -9,41 +9,43 @@
  */
 __host__ __device__
 glm::vec3 calculateRandomDirectionInHemisphere(
-        glm::vec3 normal, thrust::default_random_engine &rng) {
-    thrust::uniform_real_distribution<float> u01(0, 1);
+	glm::vec3 normal, thrust::default_random_engine& rng) {
+	thrust::uniform_real_distribution<float> u01(0, 1);
 
-    float up = sqrt(u01(rng)); // cos(theta)
-    float over = sqrt(1 - up * up); // sin(theta)
-    float around = u01(rng) * TWO_PI;
+	float up = sqrt(u01(rng)); // cos(theta)
+	float over = sqrt(1 - up * up); // sin(theta)
+	float around = u01(rng) * TWO_PI;
 
-    // Find a direction that is not the normal based off of whether or not the
-    // normal's components are all equal to sqrt(1/3) or whether or not at
-    // least one component is less than sqrt(1/3). Learned this trick from
-    // Peter Kutz.
+	// Find a direction that is not the normal based off of whether or not the
+	// normal's components are all equal to sqrt(1/3) or whether or not at
+	// least one component is less than sqrt(1/3). Learned this trick from
+	// Peter Kutz.
 
-    glm::vec3 directionNotNormal;
-    if (abs(normal.x) < SQRT_OF_ONE_THIRD) {
-        directionNotNormal = glm::vec3(1, 0, 0);
-    } else if (abs(normal.y) < SQRT_OF_ONE_THIRD) {
-        directionNotNormal = glm::vec3(0, 1, 0);
-    } else {
-        directionNotNormal = glm::vec3(0, 0, 1);
-    }
+	glm::vec3 directionNotNormal;
+	if (abs(normal.x) < SQRT_OF_ONE_THIRD) {
+		directionNotNormal = glm::vec3(1, 0, 0);
+	}
+	else if (abs(normal.y) < SQRT_OF_ONE_THIRD) {
+		directionNotNormal = glm::vec3(0, 1, 0);
+	}
+	else {
+		directionNotNormal = glm::vec3(0, 0, 1);
+	}
 
-    // Use not-normal direction to generate two perpendicular directions
-    glm::vec3 perpendicularDirection1 =
-        glm::normalize(glm::cross(normal, directionNotNormal));
-    glm::vec3 perpendicularDirection2 =
-        glm::normalize(glm::cross(normal, perpendicularDirection1));
+	// Use not-normal direction to generate two perpendicular directions
+	glm::vec3 perpendicularDirection1 =
+		glm::normalize(glm::cross(normal, directionNotNormal));
+	glm::vec3 perpendicularDirection2 =
+		glm::normalize(glm::cross(normal, perpendicularDirection1));
 
-    return up * normal
-        + cos(around) * over * perpendicularDirection1
-        + sin(around) * over * perpendicularDirection2;
+	return up * normal
+		+ cos(around) * over * perpendicularDirection1
+		+ sin(around) * over * perpendicularDirection2;
 }
 
 __host__ __device__
 float luminance(const glm::vec3& c) {
-    return 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
+	return 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
 }
 
 /**
@@ -73,45 +75,77 @@ float luminance(const glm::vec3& c) {
  */
 __host__ __device__
 void scatterRay(
-    PathSegment& pathSegment,
-    const ShadeableIntersection& intersection,
-    const Material& material,
-    thrust::default_random_engine& rng)
+	PathSegment& pathSegment,
+	const ShadeableIntersection& intersection,
+	const Material& material,
+	thrust::default_random_engine& rng)
 {
 
-    // --- Light hit ---
-    if (material.emittance > 0.0f) {
-        pathSegment.color *= material.color * material.emittance;
-        pathSegment.remainingBounces = 0;
-        return;
-    }
+	// --- Light hit ---
+	if (material.emittance > 0.0f) {
+		pathSegment.color *= material.color * material.emittance;
+		pathSegment.remainingBounces = 0;
+		return;
+	}
 
-    glm::vec3 newDir;
+	glm::vec3 newDir;
+	glm::vec3 offsetNormal = intersection.surfaceNormal;
 
-    // --- Specular ---
-    if (material.hasReflective) {
-        newDir = glm::reflect(pathSegment.ray.direction, intersection.surfaceNormal);
-        pathSegment.color *= material.specular.color;
-		//pathSegment.color *= glm::vec3(1.0f, 0.0f, 0.0f); // make reflective surfaces white
-       // pathSegment.remainingBounces = 0;
-    }
-    // --- Diffuse ---
-    else {
-        newDir = calculateRandomDirectionInHemisphere(
-		intersection.surfaceNormal, rng);
+	// --- Specular ---
+	if (material.hasReflective) {
+		newDir = glm::reflect(pathSegment.ray.direction, intersection.surfaceNormal);
+		pathSegment.color *= material.specular.color;
+	}
+	else if (material.hasRefractive) {
+		glm::vec3 N = intersection.surfaceNormal;
+		glm::vec3 I = glm::normalize(pathSegment.ray.direction);
+
+		float cosI = glm::dot(I, N);
+		float etaI = 1.0f;  // air IOR
+		float etaT = material.indexOfRefraction;  // material IOR
+
+		// Determine if ray is entering or exiting
+		if (cosI > 0.0f) {
+			// Ray is EXITING (inside material, hitting from inside)
+		 // Flip normal and swap IORs
+			N = -N;
+			float temp = etaI;
+			etaI = etaT;
+			etaT = temp;
+			offsetNormal = -intersection.surfaceNormal; // offset inward
+		}
+
+		float eta = etaI / etaT;
+
+		// Compute refracted direction
+		newDir = glm::refract(I, N, eta);
+
+		// Handle Total Internal Reflection
+		if (glm::length(newDir) < 0.001f) {
+			// TIR occurred - reflect instead of refract
+			newDir = glm::reflect(I, N);
+		}
+
 		pathSegment.color *= material.color;
-    }
+	}
+	// --- Diffuse ---
+	else {
+		newDir = calculateRandomDirectionInHemisphere(
+			intersection.surfaceNormal, rng);
+		pathSegment.color *= material.color;
+	}
 
-    // --- Spawn next ray ---
-    glm::vec3 hitPoint =
-        pathSegment.ray.origin + pathSegment.ray.direction * intersection.t;
+	// --- Spawn next ray ---
+	glm::vec3 hitPoint =
+		pathSegment.ray.origin + pathSegment.ray.direction * intersection.t;
 
-    const float EPS = 1e-4f;
-    pathSegment.ray.origin =
-        hitPoint + intersection.surfaceNormal * EPS;
+	const float EPS = 1e-4f;
 
-    pathSegment.ray.direction = glm::normalize(newDir);
-    pathSegment.remainingBounces--;
+	// Offset along the scattered direction to avoid self-intersection
+	pathSegment.ray.origin = hitPoint + glm::normalize(newDir) * EPS;
+
+	pathSegment.ray.direction = glm::normalize(newDir);
+	pathSegment.remainingBounces--;
 }
 
 

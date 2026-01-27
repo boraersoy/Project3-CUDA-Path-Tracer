@@ -11,13 +11,13 @@
  * Handy-dandy hash function that provides seeds for random number generation.
  */
 __host__ __device__ inline unsigned int utilhash(unsigned int a) {
-    a = (a + 0x7ed55d16) + (a << 12);
-    a = (a ^ 0xc761c23c) ^ (a >> 19);
-    a = (a + 0x165667b1) + (a << 5);
-    a = (a + 0xd3a2646c) ^ (a << 9);
-    a = (a + 0xfd7046c5) + (a << 3);
-    a = (a ^ 0xb55a4f09) ^ (a >> 16);
-    return a;
+	a = (a + 0x7ed55d16) + (a << 12);
+	a = (a ^ 0xc761c23c) ^ (a >> 19);
+	a = (a + 0x165667b1) + (a << 5);
+	a = (a + 0xd3a2646c) ^ (a << 9);
+	a = (a + 0xfd7046c5) + (a << 3);
+	a = (a ^ 0xb55a4f09) ^ (a >> 16);
+	return a;
 }
 
 // CHECKITOUT
@@ -26,128 +26,130 @@ __host__ __device__ inline unsigned int utilhash(unsigned int a) {
  * Falls slightly short so that it doesn't intersect the object it's hitting.
  */
 __host__ __device__ glm::vec3 getPointOnRay(Ray r, float t) {
-    return r.origin + (t - .0001f) * glm::normalize(r.direction);
+	return r.origin + (t - .0001f) * glm::normalize(r.direction);
 }
 
 /**
  * Multiplies a mat4 and a vec4 and returns a vec3 clipped from the vec4.
  */
 __host__ __device__ glm::vec3 multiplyMV(glm::mat4 m, glm::vec4 v) {
-    return glm::vec3(m * v);
+	return glm::vec3(m * v);
 }
 
 // CHECKITOUT
 /**
  * Test intersection between a ray and a transformed cube. Untransformed,
- * the cube ranges from -0.5 to 0.5 in each axis and is centered at the origin.
+ * the cube ranges from -0.5 to0.5 in each axis and is centered at the origin.
  *
- * @param intersectionPoint  Output parameter for point of intersection.
- * @param normal             Output parameter for surface normal.
- * @param outside            Output param for whether the ray came from outside.
- * @return                   Ray parameter `t` value. -1 if no intersection.
+ * @param intersectionPoint Output parameter for point of intersection.
+ * @param normal Output parameter for surface normal.
+ * @param outside Output param for whether the ray came from outside.
+ * @return Ray parameter `t` value. -1 if no intersection.
  */
 __host__ __device__ float boxIntersectionTest(Geom box, Ray r,
-        glm::vec3 &intersectionPoint, glm::vec3 &normal, bool &outside) {
-    Ray q;
-    q.origin    =                multiplyMV(box.inverseTransform, glm::vec4(r.origin   , 1.0f));
-    q.direction = glm::normalize(multiplyMV(box.inverseTransform, glm::vec4(r.direction, 0.0f)));
+	glm::vec3& intersectionPoint, glm::vec3& normal, bool& outside) {
+	Ray q;
+	q.origin = multiplyMV(box.inverseTransform, glm::vec4(r.origin, 1.0f));
+	q.direction = glm::normalize(multiplyMV(box.inverseTransform, glm::vec4(r.direction, 0.0f)));
 
-    float tmin = -1e38f;
-    float tmax = 1e38f;
-    glm::vec3 tmin_n;
-    glm::vec3 tmax_n;
-    for (int xyz = 0; xyz < 3; ++xyz) {
-        float qdxyz = q.direction[xyz];
-        /*if (glm::abs(qdxyz) > 0.00001f)*/ {
-            float t1 = (-0.5f - q.origin[xyz]) / qdxyz;
-            float t2 = (+0.5f - q.origin[xyz]) / qdxyz;
-            float ta = glm::min(t1, t2);
-            float tb = glm::max(t1, t2);
-            glm::vec3 n;
-            n[xyz] = t2 < t1 ? +1 : -1;
-            if (ta > 0 && ta > tmin) {
-                tmin = ta;
-                tmin_n = n;
-            }
-            if (tb < tmax) {
-                tmax = tb;
-                tmax_n = n;
-            }
-        }
-    }
+	float tmin = -1e38f;
+	float tmax = 1e38f;
+	glm::vec3 tmin_n;
+	glm::vec3 tmax_n;
+	for (int xyz = 0; xyz < 3; ++xyz) {
+		float qdxyz = q.direction[xyz];
+		/*if (glm::abs(qdxyz) >0.00001f)*/ {
+			float t1 = (-0.5f - q.origin[xyz]) / qdxyz;
+			float t2 = (+0.5f - q.origin[xyz]) / qdxyz;
+			float ta = glm::min(t1, t2);
+			float tb = glm::max(t1, t2);
+			glm::vec3 n;
+			n[xyz] = t2 < t1 ? +1 : -1;
+			if (ta > 0 && ta > tmin) {
+				tmin = ta;
+				tmin_n = n;
+			}
+			if (tb < tmax) {
+				tmax = tb;
+				tmax_n = n;
+			}
+		}
+	}
 
-    if (tmax >= tmin && tmax > 0) {
-        outside = true;
-        if (tmin <= 0) {
-            tmin = tmax;
-            tmin_n = tmax_n;
-            outside = false;
-        }
-        intersectionPoint = multiplyMV(box.transform, glm::vec4(getPointOnRay(q, tmin), 1.0f));
-        normal = glm::normalize(multiplyMV(box.invTranspose, glm::vec4(tmin_n, 0.0f)));
-        return glm::length(r.origin - intersectionPoint);
-    }
-    return -1;
+	if (tmax >= tmin && tmax > 0) {
+		outside = true;
+		if (tmin <= 0) {
+			tmin = tmax;
+			tmin_n = tmax_n;
+			outside = false;
+		}
+		intersectionPoint = multiplyMV(box.transform, glm::vec4(getPointOnRay(q, tmin), 1.0f));
+		normal = glm::normalize(multiplyMV(box.invTranspose, glm::vec4(tmin_n, 0.0f)));
+		return glm::length(r.origin - intersectionPoint);
+	}
+	return -1;
 }
 
 // CHECKITOUT
 /**
  * Test intersection between a ray and a transformed sphere. Untransformed,
- * the sphere always has radius 0.5 and is centered at the origin.
+ * the sphere always has radius0.5 and is centered at the origin.
  *
- * @param intersectionPoint  Output parameter for point of intersection.
- * @param normal             Output parameter for surface normal.
- * @param outside            Output param for whether the ray came from outside.
- * @return                   Ray parameter `t` value. -1 if no intersection.
+ * @param intersectionPoint Output parameter for point of intersection.
+ * @param normal Output parameter for surface normal.
+ * @param outside Output param for whether the ray came from outside.
+ * @return Ray parameter `t` value. -1 if no intersection.
  */
 __host__ __device__ float sphereIntersectionTest(Geom sphere, Ray r,
-        glm::vec3 &intersectionPoint, glm::vec3 &normal, bool &outside) {
-    float radius = .5;
+	glm::vec3& intersectionPoint, glm::vec3& normal, bool& outside) {
+	float radius = .5;
 
-    glm::vec3 ro = multiplyMV(sphere.inverseTransform, glm::vec4(r.origin, 1.0f));
-    glm::vec3 rd = glm::normalize(multiplyMV(sphere.inverseTransform, glm::vec4(r.direction, 0.0f)));
+	glm::vec3 ro = multiplyMV(sphere.inverseTransform, glm::vec4(r.origin, 1.0f));
+	glm::vec3 rd = glm::normalize(multiplyMV(sphere.inverseTransform, glm::vec4(r.direction, 0.0f)));
 
-    Ray rt;
-    rt.origin = ro;
-    rt.direction = rd;
+	Ray rt;
+	rt.origin = ro;
+	rt.direction = rd;
 
-    float vDotDirection = glm::dot(rt.origin, rt.direction);
-    float radicand = vDotDirection * vDotDirection - (glm::dot(rt.origin, rt.origin) - powf(radius, 2));
-    if (radicand < 0) {
-        return -1;
-    }
+	float vDotDirection = glm::dot(rt.origin, rt.direction);
+	float radicand = vDotDirection * vDotDirection - (glm::dot(rt.origin, rt.origin) - powf(radius, 2));
+	if (radicand < 0) {
+		return -1;
+	}
 
-    float squareRoot = sqrt(radicand);
-    float firstTerm = -vDotDirection;
-    float t1 = firstTerm + squareRoot;
-    float t2 = firstTerm - squareRoot;
+	float squareRoot = sqrt(radicand);
+	float firstTerm = -vDotDirection;
+	float t1 = firstTerm + squareRoot;
+	float t2 = firstTerm - squareRoot;
 
-    float t = 0;
-    if (t1 < 0 && t2 < 0) {
-        return -1;
-    } else if (t1 > 0 && t2 > 0) {
-        t = min(t1, t2);
-        outside = true;
-    } else {
-        t = max(t1, t2);
-        outside = false;
-    }
+	float t = 0;
+	if (t1 < 0 && t2 < 0) {
+		return -1;
+	}
+	else if (t1 > 0 && t2 > 0) {
+		t = min(t1, t2);
+		outside = true;
+	}
+	else {
+		t = max(t1, t2);
+		outside = false;
+	}
 
-    glm::vec3 objspaceIntersection = getPointOnRay(rt, t);
+	glm::vec3 objspaceIntersection = getPointOnRay(rt, t);
 
-    intersectionPoint = multiplyMV(sphere.transform, glm::vec4(objspaceIntersection, 1.f));
-    normal = glm::normalize(multiplyMV(sphere.invTranspose, glm::vec4(objspaceIntersection, 0.f)));
-    if (!outside) {
-        normal = -normal;
-    }
+	intersectionPoint = multiplyMV(sphere.transform, glm::vec4(objspaceIntersection, 1.f));
+	normal = glm::normalize(multiplyMV(sphere.invTranspose, glm::vec4(objspaceIntersection, 0.f)));
+	if (!outside) {
+		normal = -normal;
+	}
 
-    return glm::length(r.origin - intersectionPoint);
+	return glm::length(r.origin - intersectionPoint);
 }
 
 
 __host__ __device__ float triangleIntersectionTest(const Triangle& tri,
-    const Geom& geom, const Ray& r, glm::vec3& intersectionPoint,
-    glm::vec3& normal, bool& outside)
+	const Geom& geom, const Ray& r, glm::vec3& intersectionPoint,
+	glm::vec3& normal, bool& outside)
 {
 	// --- Transform ray to object space ---
 	glm::vec3 ro = multiplyMV(geom.inverseTransform, glm::vec4(r.origin, 1.0f));
@@ -171,11 +173,11 @@ __host__ __device__ float triangleIntersectionTest(const Triangle& tri,
 	float invDet = 1.0f / det;
 	glm::vec3 tvec = rt.origin - tri.v0;
 	float u = glm::dot(tvec, pvec) * invDet;
-	if (u < 0.0f || u > 1.0f) return -1.0f;
+	if (u < 0.0f || u >1.0f) return -1.0f;
 
 	glm::vec3 qvec = glm::cross(tvec, e1);
 	float v = glm::dot(rt.direction, qvec) * invDet;
-	if (v < 0.0f || u + v > 1.0f) return -1.0f;
+	if (v < 0.0f || u + v >1.0f) return -1.0f;
 
 	float t = glm::dot(e2, qvec) * invDet;
 	if (t <= EPS) return -1.0f;
@@ -199,207 +201,220 @@ __host__ __device__ float triangleIntersectionTest(const Triangle& tri,
 
 __device__
 float triangleIntersection_ObjectSpace(
-    const Triangle& tri,
-    const Ray& rayOS,
-    glm::vec3& objHit,
-    glm::vec3& objNormal
+	const Triangle& tri,
+	const Ray& rayOS,
+	glm::vec3& objHit,
+	glm::vec3& objNormal
 ) {
-    const float EPS = 1e-7f;
+	const float EPS = 1e-7f;
 
-    glm::vec3 e1 = tri.v1 - tri.v0;
-    glm::vec3 e2 = tri.v2 - tri.v0;
+	glm::vec3 e1 = tri.v1 - tri.v0;
+	glm::vec3 e2 = tri.v2 - tri.v0;
 
-    glm::vec3 pvec = glm::cross(rayOS.direction, e2);
-    float det = glm::dot(e1, pvec);
-    if (fabs(det) < EPS) return -1.0f;
+	glm::vec3 pvec = glm::cross(rayOS.direction, e2);
+	float det = glm::dot(e1, pvec);
+	if (fabs(det) < EPS) return -1.0f;
 
-    float invDet = 1.0f / det;
-    glm::vec3 tvec = rayOS.origin - tri.v0;
+	float invDet = 1.0f / det;
+	glm::vec3 tvec = rayOS.origin - tri.v0;
 
-    float u = glm::dot(tvec, pvec) * invDet;
-    if (u < 0.0f || u > 1.0f) return -1.0f;
+	float u = glm::dot(tvec, pvec) * invDet;
+	if (u < 0.0f || u >1.0f) return -1.0f;
 
-    glm::vec3 qvec = glm::cross(tvec, e1);
-    float v = glm::dot(rayOS.direction, qvec) * invDet;
-    if (v < 0.0f || u + v > 1.0f) return -1.0f;
+	glm::vec3 qvec = glm::cross(tvec, e1);
+	float v = glm::dot(rayOS.direction, qvec) * invDet;
+	if (v < 0.0f || u + v >1.0f) return -1.0f;
 
-    float t = glm::dot(e2, qvec) * invDet;
-    if (t <= EPS) return -1.0f;
+	float t = glm::dot(e2, qvec) * invDet;
+	if (t <= EPS) return -1.0f;
 
-    objHit = rayOS.origin + t * rayOS.direction;
-    objNormal = tri.normal;
+	objHit = rayOS.origin + t * rayOS.direction;
+	objNormal = tri.normal;
 
-    return t; // OBJECT-SPACE t
+	return t; // OBJECT-SPACE t
 }
 
 
-__host__ __device__ float triangleMeshIntersectionTest(
-    const Geom& geom,
-    const Triangle* triangles,
-    const Ray& ray,
-    glm::vec3& out_intersect,
-    glm::vec3& out_normal,
-    bool& outside
+__device__ float triangleMeshIntersectionTest(
+	const Geom& geom,
+	const Triangle* triangles,
+	const Ray& ray,
+	glm::vec3& out_intersect,
+	glm::vec3& out_normal,
+	bool& outside,
+	BVHTraverseStats* stats
 ) {
-    float t_min = FLT_MAX;
-    bool hit = false;
+	float t_min = FLT_MAX;
+	bool hit = false;
 
-    glm::vec3 tmp_intersect;
-    glm::vec3 tmp_normal;
-    bool tmp_outside;
+	glm::vec3 tmp_intersect;
+	glm::vec3 tmp_normal;
+	bool tmp_outside;
 
-    int start = geom.triStart;
-    int end = start + geom.triCount;
+	int start = geom.triStart;
+	int end = start + geom.triCount;
 
-    for (int i = start; i < end; i++) {
-        float t = triangleIntersectionTest(
-            triangles[i],
-            geom,
-            ray,
-            tmp_intersect,
-            tmp_normal,
-            tmp_outside
-        );
+	for (int i = start; i < end; i++) {
+		//	atomicAdd(&stats->triTests, 1ULL);
 
-        if (t > 0.0f && t < t_min) {
-            t_min = t;
-            out_intersect = tmp_intersect;
-            out_normal = tmp_normal;
-            outside = tmp_outside;
-            hit = true;
-        }
-    }
+		float t = triangleIntersectionTest(
+			triangles[i],
+			geom,
+			ray,
+			tmp_intersect,
+			tmp_normal,
+			tmp_outside
+		);
 
-    return hit ? t_min : -1.0f;
+		if (t > 0.0f && t < t_min) {
+			t_min = t;
+			out_intersect = tmp_intersect;
+			out_normal = tmp_normal;
+			outside = tmp_outside;
+			hit = true;
+		}
+	}
+
+	return hit ? t_min : -1.0f;
 }
 
 __host__ __device__
 bool intersectAABB(
-    const Ray& rayOS,
-    const AABB& box,
-    float tClosest
+	const Ray& rayOS,
+	const AABB& box,
+	float tClosest
 ) {
-    float tmin = 0.0f;
-    float tmax = tClosest;
+	float tmin = 0.0f;
+	float tmax = tClosest;
 
-    for (int axis = 0; axis < 3; axis++) {
-        float origin = rayOS.origin[axis];
-        float dir = rayOS.direction[axis];
+	for (int axis = 0; axis < 3; axis++) {
+		float origin = rayOS.origin[axis];
+		float dir = rayOS.direction[axis];
 
-        if (fabsf(dir) < 1e-8f) {
-            if (origin < box.min[axis] || origin > box.max[axis])
-                return false;
-            continue;
-        }
+		if (fabsf(dir) < 1e-8f) {
+			if (origin < box.min[axis] || origin > box.max[axis])
+				return false;
+			continue;
+		}
 
-        float invD = 1.0f / dir;
-        float t0 = (box.min[axis] - origin) * invD;
-        float t1 = (box.max[axis] - origin) * invD;
+		float invD = 1.0f / dir;
+		float t0 = (box.min[axis] - origin) * invD;
+		float t1 = (box.max[axis] - origin) * invD;
 
-        if (t0 > t1) {
-            float tmp = t0; t0 = t1; t1 = tmp;
-        }
+		if (t0 > t1) {
+			float tmp = t0; t0 = t1; t1 = tmp;
+		}
 
-        tmin = fmaxf(tmin, t0);
-        tmax = fminf(tmax, t1);
+		tmin = fmaxf(tmin, t0);
+		tmax = fminf(tmax, t1);
 
-        if (tmax < tmin)
-            return false;
-    }
+		if (tmax < tmin)
+			return false;
+	}
 
-    return true;
+	return true;
 }
 
 
 __device__ float traverseBVH(
-    const BVHNode* nodes,
-    const int* triIndices,
-    const Triangle* triangles,
-    const Geom& geom,
-    const Ray& rayWS,
-    glm::vec3& out_intersect,
-    glm::vec3& out_normal,
-    bool& out_outside
+	const BVHNode* nodes,
+	const int* triIndices,
+	const Triangle* triangles,
+	const Geom& geom,
+	const Ray& rayWS,
+	glm::vec3& out_intersect,
+	glm::vec3& out_normal,
+	bool& out_outside,
+	BVHTraverseStats* stats
 ) {
-    // ---- cache object-space ray ONCE ----
-    Ray rayOS;
-    rayOS.origin = multiplyMV(
-        geom.inverseTransform,
-        glm::vec4(rayWS.origin, 1.0f)
-    );
+	// ---- cache object-space ray ONCE ----
+	Ray rayOS;
+	rayOS.origin = multiplyMV(
+		geom.inverseTransform,
+		glm::vec4(rayWS.origin, 1.0f)
+	);
 
-    rayOS.direction = glm::normalize(
-        multiplyMV(
-            geom.inverseTransform,
-            glm::vec4(rayWS.direction, 0.0f)
-        )
-    );
+	rayOS.direction = glm::normalize(
+		multiplyMV(
+			geom.inverseTransform,
+			glm::vec4(rayWS.direction, 0.0f)
+		)
+	);
 
-    float tClosest = FLT_MAX;
-    bool hit = false;
+	// tClosestOS is the closest hit distance in OBJECT SPACE and used for pruning
+	float tClosestOS = FLT_MAX;
+	// bestTWS is the closest hit distance in WORLD SPACE that we will return
+	float bestTWS = FLT_MAX;
+	bool hit = false;
 
-    int stack[64];
-    int stackPtr = 0;
-    stack[stackPtr++] = 0;
+	int stack[64];
+	int stackPtr = 0;
+	stack[stackPtr++] = 0;
 
-    while (stackPtr > 0) {
+	while (stackPtr > 0) {
 
-        int nodeIdx = stack[--stackPtr];
+		int nodeIdx = stack[--stackPtr];
 
-        // -------- index safety --------
-        if (nodeIdx < 0)
-            continue;
+		// -------- index safety --------
+		if (nodeIdx < 0)
+			continue;
 
-        const BVHNode& node = nodes[nodeIdx];
+		const BVHNode& node = nodes[nodeIdx];
+		//atomicAdd(&stats->nodeVisits,1ULL);
 
+		if (!intersectAABB(rayOS, node.bounds, tClosestOS))
+			continue;
 
-        if (!intersectAABB(rayOS, node.bounds, tClosest))
-            continue;
+		if (node.left < 0 && node.right < 0) {
 
-        if (node.left < 0 && node.right < 0) {
+			int start = node.triStart;
+			int end = start + node.triCount;
 
-            int start = node.triStart;
-            int end = start + node.triCount;
+			for (int i = start; i < end; i++) {
+				//	atomicAdd(&stats->triTests,1ULL);
 
-            for (int i = start; i < end; i++) {
+				int triIdx = triIndices[i];
+				if (triIdx < 0)
+					continue;
 
-                int triIdx = triIndices[i];
-                if (triIdx < 0)
-                    continue;
+				glm::vec3 objHit, objNormal;
 
-                glm::vec3 objHit, objNormal;
+				float tOS = triangleIntersection_ObjectSpace(
+					triangles[triIdx],
+					rayOS,
+					objHit,
+					objNormal
+				);
 
-                float t = triangleIntersection_ObjectSpace(
-                    triangles[triIdx],
-                    rayOS,
-                    objHit,
-                    objNormal
-                );
+				if (tOS > 0.0f && tOS < tClosestOS) {
+					// update object-space closest for pruning
+					tClosestOS = tOS;
+					hit = true;
 
-                if (t > 0.0f && t < tClosest) {
-                    tClosest = t;
-                    hit = true;
+					// convert ONCE for final hit
+					out_intersect =
+						multiplyMV(geom.transform, glm::vec4(objHit, 1.0f));
 
-                    // convert ONCE for final hit
-                    out_intersect =
-                        multiplyMV(geom.transform, glm::vec4(objHit, 1.0f));
+					out_normal = glm::normalize(
+						multiplyMV(geom.invTranspose, glm::vec4(objNormal, 0.0f))
+					);
 
-                    out_normal = glm::normalize(
-                        multiplyMV(geom.invTranspose, glm::vec4(objNormal, 0.0f))
-                    );
+					out_outside = glm::dot(out_normal, rayWS.direction) < 0.0f;
+					if (!out_outside) out_normal = -out_normal;
 
-                    out_outside = glm::dot(out_normal, rayWS.direction) < 0.0f;
-                    if (!out_outside) out_normal = -out_normal;
-                }
-            }
-        }
-        else {
-            if (node.right >= 0 && stackPtr < 63)
-                stack[stackPtr++] = node.right;
-            if (node.left >= 0 && stackPtr < 63)
-                stack[stackPtr++] = node.left;
-        }
-    }
+					// compute world-space t for returning/consistent comparisons outside BVH
+					float tWS = glm::length(out_intersect - rayWS.origin);
+					if (tWS < bestTWS) bestTWS = tWS;
+				}
+			}
+		}
+		else {
+			if (node.right >= 0 && stackPtr < 63)
+				stack[stackPtr++] = node.right;
+			if (node.left >= 0 && stackPtr < 63)
+				stack[stackPtr++] = node.left;
+		}
+	}
 
-    return hit ? tClosest : -1.0f;
+	return hit ? bestTWS : -1.0f;
 }

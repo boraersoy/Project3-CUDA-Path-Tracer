@@ -1,0 +1,7 @@
+OBJECT 6
+mesh
+models/standford/xyzrgb_dragon249k.obj
+material 5 
+TRANS -1 4 1
+ROTATE 0 0 0
+SCALE  0.0475 0.0475 0.0475

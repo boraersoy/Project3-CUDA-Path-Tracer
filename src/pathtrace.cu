@@ -17,6 +17,8 @@
 #include "interactions.h"
 #include "objloader.h"
 #include "bvh.h"
+#include <cuda_runtime.h>
+#include <device_launch_parameters.h>
 
 #define ERRORCHECK 1
 
@@ -27,6 +29,20 @@
 #define SORT_BY_MATERIAL 1
 #define CACHE_FIRST_BOUNCE 0
 #define BBVH 0
+#define AntiAliasing 1
+
+__host__ __device__ float rand01(int x, int y, int iter) {
+	unsigned int seed =
+		x * 1973 +
+		y * 9277 +
+		iter * 26699 +
+		89173;
+
+	seed = (seed << 13) ^ seed;
+	return 1.0f - ((seed * (seed * seed * 15731u + 789221u) + 1376312589u)
+		& 0x7fffffff) / 1073741824.0f;
+}
+
 
 
 
@@ -121,10 +137,10 @@ static ShadeableIntersection* dev_intersections = NULL;
 static int* dev_materialKeys = nullptr;
 static Triangle* dev_triangle = nullptr;
 int num_triangles = 1;
-static AABB* dev_aabb = nullptr;
-int num_aabbs = 1;
 static BVHNode* dev_bvhNodes = nullptr;
 int* dev_triIndices = nullptr;
+BVHTraverseStats* dev_bvhStats = nullptr;
+
 
 
 
@@ -176,9 +192,9 @@ void pathtraceInit(Scene* scene) {
 
 
 	cudaMalloc(&dev_triangle, num_triangles * sizeof(Triangle));
-	cudaMemcpy(dev_triangle, hst_scene->triangles.data() , num_triangles * sizeof(Triangle), cudaMemcpyHostToDevice);
+	cudaMemcpy(dev_triangle, hst_scene->triangles.data(), num_triangles * sizeof(Triangle), cudaMemcpyHostToDevice);
 
-//allocate device memory for single mesh AABB
+	//allocate device memory for single mesh AABB
 #if BBVH
 	BVH& bvh = hst_scene->cpubvh;
 
@@ -206,7 +222,7 @@ void pathtraceInit(Scene* scene) {
 		cudaMemcpyHostToDevice
 	);
 #endif BBVH
-
+	cudaMalloc(&dev_bvhStats, sizeof(BVHTraverseStats));
 	checkCUDAError("pathtraceInit");
 }
 
@@ -229,7 +245,7 @@ void pathtraceFree() {
 	cudaFree(dev_bvhNodes);
 	cudaFree(dev_triIndices);
 #endif
-	
+
 	checkCUDAError("pathtraceFree");
 }
 
@@ -237,7 +253,8 @@ void pathtraceFree() {
 * Generate PathSegments with rays from the camera through the screen into the
 * scene, which is the first bounce of rays.
 *
-* Antialiasing - add rays for sub-pixel sampling
+* Antialiasing
+- add rays for sub-pixel sampling
 * motion blur - jitter rays "in time"
 * lens effect - jitter ray origin positions based on a lens
 */
@@ -253,11 +270,25 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
 		segment.ray.origin = cam.position;
 		segment.color = glm::vec3(1.0f, 1.0f, 1.0f);
 
+#if AntiAliasing
+		float jx = rand01(x, y, iter);
+		float jy = rand01(x + 17, y + 13, iter);
+
+
+		float px = (float)x + jx;
+		float py = (float)y + jy;
+
 		// TODO: implement antialiasing by jittering the ray
+		segment.ray.direction = glm::normalize(cam.view
+			- cam.right * cam.pixelLength.x * ((float)px - (float)cam.resolution.x * 0.5f)
+			- cam.up * cam.pixelLength.y * ((float)py - (float)cam.resolution.y * 0.5f)
+		);
+#else
 		segment.ray.direction = glm::normalize(cam.view
 			- cam.right * cam.pixelLength.x * ((float)x - (float)cam.resolution.x * 0.5f)
 			- cam.up * cam.pixelLength.y * ((float)y - (float)cam.resolution.y * 0.5f)
 		);
+#endif
 
 		segment.pixelIndex = index;
 		segment.remainingBounces = traceDepth;
@@ -278,6 +309,7 @@ __global__ void computeIntersections(
 	, ShadeableIntersection* intersections
 	, BVHNode* dev_bvhNodes
 	, int* dev_triIndices
+	, BVHTraverseStats* dev_bvhStats
 )
 {
 	int path_index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -320,10 +352,11 @@ __global__ void computeIntersections(
 					pathSegment.ray,
 					tmp_intersect,
 					tmp_normal,
-					outside
+					outside,
+					dev_bvhStats
 				);
 #else 
-				t = triangleMeshIntersectionTest(geom, triangles, pathSegment.ray, tmp_intersect, tmp_normal, outside);
+				t = triangleMeshIntersectionTest(geom, triangles, pathSegment.ray, tmp_intersect, tmp_normal, outside, dev_bvhStats);
 #endif
 			}
 			// Compute the minimum t from the intersection tests to determine what
@@ -475,7 +508,7 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 
 		// tracing
 		dim3 numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
-	
+
 #if CACHE_FIRST_BOUNCE
 		if (depth == 0) {
 			if (!first_bounce_cached) {
@@ -511,6 +544,8 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 		}
 		else
 #endif
+			cudaMemset(dev_bvhStats, 0, sizeof(BVHTraverseStats));
+
 		computeIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
 			depth,
 			num_paths,
@@ -520,11 +555,23 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 			hst_scene->geoms.size(),
 			dev_intersections,
 			dev_bvhNodes,
-			dev_triIndices
+			dev_triIndices,
+			dev_bvhStats
 			);
 		checkCUDAError("trace one bounce");
 		cudaDeviceSynchronize();
 		depth++;
+		//print the bvh traversal stats
+		BVHTraverseStats hst_bvhStats;
+		cudaMemcpy(&hst_bvhStats, dev_bvhStats, sizeof(BVHTraverseStats), cudaMemcpyDeviceToHost);
+		printf("Depth %d: BVH Node Visits: %llu, Triangle Tests: %llu, Triangles Per Ray: %llu\n",
+			depth,
+			hst_bvhStats.nodeVisits,
+			hst_bvhStats.triTests,
+			hst_bvhStats.triTests / num_paths
+		);
+
+
 
 
 
@@ -593,7 +640,7 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 		if (num_paths == 0 || depth >= traceDepth) {
 			iterationComplete = true;
 		}
-		
+
 
 		if (guiData != NULL)
 		{

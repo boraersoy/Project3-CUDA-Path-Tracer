@@ -50,24 +50,13 @@ EMITTANCE   0
 
 // Diffuse green
 MATERIAL 5
-RGB         .85 .35 .35
+RGB         .90 .88 .81
 SPECEX      0
 SPECRGB     0 0 0
 REFL        0
 REFR        0
 REFRIOR     0
 EMITTANCE   0
-
-// Glass material
-MATERIAL 6
-RGB         .85 .35 .35
-SPECEX      0
-SPECRGB     0 0 0
-REFL        0
-REFR        0.5
-REFRIOR     1.55
-EMITTANCE   0
-
 
 // Camera
 CAMERA
@@ -130,22 +119,31 @@ ROTAT       0 0 0
 SCALE       .01 10 10
 
 
+
 OBJECT 6
 mesh
 models/standford/cow5k.obj
-material 6 
-TRANS 0 3 2
+material 5 
+TRANS 0 3 -2
 ROTATE 0 0 0
 SCALE  1 1 1
 
-// Sphere
+
 OBJECT 7
+mesh
+models/standford/stanford-bunny35k.obj
+material 5 
+TRANS -2 -1 1
+ROTATE 0 0 0
+SCALE  20 20 20 
+
+// Sphere
+OBJECT 8
 sphere
 material 4
-TRANS       -1 6 -1
+TRANS       1 3 -1
 ROTAT       0 0 0
 SCALE       3 3 3
-
 
 
 

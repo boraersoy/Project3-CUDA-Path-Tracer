@@ -1,0 +1,7 @@
+OBJECT 6
+mesh
+models/standford/stanford-bunny35k.obj
+material 5 
+TRANS 1 2 1
+ROTATE 0 0 0
+SCALE  20 20 20 
