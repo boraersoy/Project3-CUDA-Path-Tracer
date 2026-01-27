@@ -9,5 +9,14 @@ CUDA Path Tracer
 
 ### CUDA PATH TRACER (ongoing)
 
+Currently implemented sorting by material, first cache bouncing and bbvh tree and obj loading.
 
 
+
+Specular glass object
+
+<img width="800" height="800" alt="cornell 2025-12-29_13-39-29z 466samp" src="https://github.com/user-attachments/assets/67d01f64-8d81-49a4-b562-390385a276eb" />
+
+Diffuse Beige Buddha Statue
+
+<img width="800" height="800" alt="cornell 2026-01-08_09-40-36z 127samp" src="https://github.com/user-attachments/assets/c0245d3a-d801-4cb7-83be-eb97f1a3f366" />
