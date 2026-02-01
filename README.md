@@ -11,8 +11,8 @@ CUDA Path Tracer
 
 
 
-<img width="600" height="800" alt="cornell 2026-01-27_13-36-31z 4239samp" src="https://github.com/user-attachments/assets/5011e443-cea7-4ec1-94ea-533b080d1d6d" />
-<img width="600" height="800" alt="cornell 2026-01-31_16-51-26z 1800samp" src="https://github.com/user-attachments/assets/bed4a306-9bb4-43dc-952c-b9e8b0d7df6d" />
+<img width="500" height="800" alt="cornell 2026-01-27_13-36-31z 4239samp" src="https://github.com/user-attachments/assets/5011e443-cea7-4ec1-94ea-533b080d1d6d" />
+<img width="500" height="800" alt="cornell 2026-01-31_16-51-26z 1800samp" src="https://github.com/user-attachments/assets/bed4a306-9bb4-43dc-952c-b9e8b0d7df6d" />
 
 
 ### Features
@@ -29,21 +29,24 @@ CUDA Path Tracer
   - First bounce caching
   - Ray Termination with Stream Compaction
  - Model loading
-   -.obj model loading
+   - .obj model loading
    
  
 
  ### Specular and Diffuse Surfaces
 
- Sphere has specular and bunny object has diffuse surface.
+The specular shader models perfect mirror-like reflection. Incoming rays are reflected deterministically about the surface normal, producing sharp highlights and clear reflections. No light is scattered into other directions.
+The diffuse shader models rough, matte surfaces by scattering incoming light uniformly over the hemisphere around the surface normal (Lambertian reflection). New ray directions are sampled stochastically, producing soft shading and indirect illumination.
+
+<img width="800" height="800" alt="cornell 2026-01-31_16-00-34z 520samp" src="https://github.com/user-attachments/assets/c8cfa160-e93b-4479-8f3a-67d1fec8bebd" />
 
  ### Glass shader
- Glass surface using refraction.
+The glass shader models a dielectric material by splitting energy between reflection and refraction at the surface. The Fresnel term determines the probability of reflecting versus transmitting the ray, while the transmitted ray is bent according to Snell’s law.
 <img width="800" height="800" alt="cornell 2026-01-31_14-35-34z 1756samp" src="https://github.com/user-attachments/assets/86b48d8c-db6e-4fd2-ac4d-ab21f4a41f17" />
 
  ### Stochastic Sampled Anti Aliasing
 
- Here is the difference between anti aliased version of the image. Edges are sharper in the reflection with box filter anti alising.
+I used supersampling with a box filter for anti-aliasing. Multiple primary rays were generated per pixel at jittered positions inside the pixel area, and their radiance values were averaged with equal weight. This corresponds to applying a box reconstruction filter, where every sample within the pixel footprint contributes uniformly to the final color. 
  
 <img width="1415" height="698" alt="Screenshot 2026-01-31 174440" src="https://github.com/user-attachments/assets/9dcd4da5-34f8-4dd3-a711-c77b72118d54" />
 
@@ -52,7 +55,8 @@ CUDA Path Tracer
 
 ### Bounding Volume Hierarchies (BVH Tree)
 Although the BVH significantly reduced the number of triangle intersection tests, total frame time improved only marginally.  However traversal overhead, memory latency from pointer-heavy BVH access, and divergence from secondary rays dominated runtime. Later it can be tested on an open scene where rays terminate quicker.
-<img width="640" height="480" alt="Figure_1" src="https://github.com/user-attachments/assets/13467071-fdd8-4c22-a08a-dd76ec9f6bf3" />
+
+<img width="640" height="480" alt="Figure_1" src="https://github.com/user-attachments/assets/5f24259b-2fe1-4669-9b66-bcc8d530d924" />
 
 
 
@@ -64,7 +68,7 @@ Although the BVH significantly reduced the number of triangle intersection tests
 ### Material Sorting 
 Grouping shading work by material type (e.g., diffuse, glass, metal) so the renderer can evaluate similar BSDFs together—improving cache coherence, reducing branch divergence on GPU.
 Material sorting should improve performance in theory but in small scene complexity, sorting cost shadowed the performance improvement. However in really complex scene with hunders of objects material sorting should be really helpful.
-<img width="640" height="480" alt="Figure_1" src="https://github.com/user-attachments/assets/2a97ed29-7bad-4e54-b2f5-19b81c284a6f" />
+<img width="640" height="480" alt="Figure_1" src="https://github.com/user-attachments/assets/a560df3d-9631-4f59-9a88-4f8a9f3b6e2f" />
 
 
 ### First bounce caching 
