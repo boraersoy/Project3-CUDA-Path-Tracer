@@ -7,6 +7,7 @@
 #include <thrust/device_ptr.h>
 #include <thrust/count.h>
 #include <thrust/partition.h>
+#include <chrono>
 #include "sceneStructs.h"
 #include "scene.h"
 #include "glm/glm.hpp"
@@ -26,10 +27,10 @@
 #define checkCUDAError(msg) checkCUDAErrorFn(msg, FILENAME, __LINE__)
 
 
-#define SORT_BY_MATERIAL 1
-#define CACHE_FIRST_BOUNCE 0
+#define SORT_BY_MATERIAL 0
+#define CACHE_FIRST_BOUNCE 1
 #define BBVH 0
-#define AntiAliasing 1
+#define AntiAliasing 0
 
 __host__ __device__ float rand01(int x, int y, int iter) {
 	unsigned int seed =
@@ -489,6 +490,9 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 	//   for you.
 
 	// TODO: perform one iteration of path tracing
+	
+	// Start timing the entire iteration
+	auto iterationStartTime = std::chrono::high_resolution_clock::now();
 
 	generateRayFromCamera << <blocksPerGrid2d, blockSize2d >> > (cam, iter, traceDepth, dev_paths);
 	checkCUDAError("generate camera ray");
@@ -502,6 +506,9 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 
 	bool iterationComplete = false;
 	while (!iterationComplete) {
+		
+		// Start timing this depth level
+		auto depthStartTime = std::chrono::high_resolution_clock::now();
 
 		// clean shading chunks
 		cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
@@ -519,7 +526,10 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 					dev_geoms,
 					dev_triangle,
 					hst_scene->geoms.size(),
-					dev_intersections
+					dev_intersections,
+					dev_bvhNodes,
+					dev_triIndices,
+					dev_bvhStats
 					);
 
 				// cache first bounce
@@ -542,9 +552,24 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 				);
 			}
 		}
-		else
-#endif
+		else {
 			cudaMemset(dev_bvhStats, 0, sizeof(BVHTraverseStats));
+			
+			computeIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
+				depth,
+				num_paths,
+				dev_paths,
+				dev_geoms,
+				dev_triangle,
+				hst_scene->geoms.size(),
+				dev_intersections,
+				dev_bvhNodes,
+				dev_triIndices,
+				dev_bvhStats
+				);
+		}
+#else
+		cudaMemset(dev_bvhStats, 0, sizeof(BVHTraverseStats));
 
 		computeIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
 			depth,
@@ -558,19 +583,19 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 			dev_triIndices,
 			dev_bvhStats
 			);
+#endif
 		checkCUDAError("trace one bounce");
 		cudaDeviceSynchronize();
 		depth++;
 		//print the bvh traversal stats
 		BVHTraverseStats hst_bvhStats;
-		cudaMemcpy(&hst_bvhStats, dev_bvhStats, sizeof(BVHTraverseStats), cudaMemcpyDeviceToHost);
-		printf("Depth %d: BVH Node Visits: %llu, Triangle Tests: %llu, Triangles Per Ray: %llu\n",
-			depth,
-			hst_bvhStats.nodeVisits,
-			hst_bvhStats.triTests,
-			hst_bvhStats.triTests / num_paths
-		);
-
+		//cudaMemcpy(&hst_bvhStats, dev_bvhStats, sizeof(BVHTraverseStats), cudaMemcpyDeviceToHost);
+		//printf("Depth %d: BVH Node Visits: %llu, Triangle Tests: %llu, Triangles Per Ray: %llu\n",
+		//	depth,
+		//	hst_bvhStats.nodeVisits,
+		//	hst_bvhStats.triTests,
+		//	hst_bvhStats.triTests / num_paths
+		//);
 
 
 
@@ -635,7 +660,20 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 			PathSegmentActive()
 		);
 
-		num_paths = new_end - path_ptr;;
+		num_paths = new_end - path_ptr;
+		
+		// End timing for this depth level
+		cudaDeviceSynchronize();  // Ensure all GPU work is complete before measuring time
+		auto depthEndTime = std::chrono::high_resolution_clock::now();
+		std::chrono::duration<float, std::milli> depthDuration = depthEndTime - depthStartTime;
+		
+		// Store timing for this depth
+		if (guiData != NULL && depth - 1 < GuiDataContainer::MAX_DEPTH) {
+			guiData->DepthTimings[depth - 1] = depthDuration.count();
+		}
+		
+		// Print depth timing to console
+	//	printf("Depth %d: Time = %.3f ms, Active paths = %d\n", depth - 1, depthDuration.count(), num_paths);
 
 		if (num_paths == 0 || depth >= traceDepth) {
 			iterationComplete = true;
@@ -660,6 +698,21 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 	// Retrieve image from GPU
 	cudaMemcpy(hst_scene->state.image.data(), dev_image,
 		pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
+	
+	cudaDeviceSynchronize();  // Ensure all work is complete
+	
+	// Calculate total iteration time
+	auto iterationEndTime = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<float, std::milli> iterationDuration = iterationEndTime - iterationStartTime;
+	
+	if (guiData != NULL) {
+		guiData->TotalIterationTime = iterationDuration.count();
+	}
+	
+	// Print total iteration timing summary to console
+	printf("----------------------------------------\n");
+	printf("Iteration %d complete: Total time = %.3f ms\n", iter, iterationDuration.count());
+	printf("----------------------------------------\n\n");
 
 	checkCUDAError("pathtrace");
 

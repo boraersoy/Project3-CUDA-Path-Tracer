@@ -17,8 +17,17 @@
 class GuiDataContainer
 {
 public:
-    GuiDataContainer() : TracedDepth(0) {}
+    GuiDataContainer() : TracedDepth(0) {
+        for (int i = 0; i < MAX_DEPTH; i++) {
+            DepthTimings[i] = 0.0f;
+        }
+        TotalIterationTime = 0.0f;
+    }
     int TracedDepth;
+    
+    static const int MAX_DEPTH = 32;
+    float DepthTimings[MAX_DEPTH];  // Time spent at each depth level (in milliseconds)
+    float TotalIterationTime;       // Total time for the entire iteration (in milliseconds)
 };
 
 namespace utilityCore {

@@ -35,15 +35,23 @@ Scene::Scene(string filename) {
     }
 
 	////iterate triangles to compute their aabbs
-    for (const Triangle& t : triangles) {
-		AABB triAABB;
-		glm::vec3 min = glm::min(t.v0, glm::min(t.v1, t.v2));
-		glm::vec3 max = glm::max(t.v0, glm::max(t.v1, t.v2));
-		triAABB.min = min;
-		triAABB.max = max;
-		//std::cout << "Triangle AABB min: " << glm::to_string(triAABB.min) << ", max: " << glm::to_string(triAABB.max) << std::endl;
-		triangleAABBs.push_back(triAABB);
-	}
+// After loading all geometry:
+    if (!triangles.empty() && !aabbs.empty()) {
+        for (const Triangle& t : triangles) {
+            AABB triAABB;
+            glm::vec3 min = glm::min(t.v0, glm::min(t.v1, t.v2));
+            glm::vec3 max = glm::max(t.v0, glm::max(t.v1, t.v2));
+            triAABB.min = min;
+            triAABB.max = max;
+            triangleAABBs.push_back(triAABB);
+        }
+
+        buildBVH(cpubvh, triangleAABBs, aabbs[0]);
+        std::cout << "BVH built with " << cpubvh.nodes.size() << " nodes." << std::endl;
+    }
+    else {
+        std::cout << "No meshes to build BVH for." << std::endl;
+    }
 	//build bvh
 
 	
@@ -181,6 +189,19 @@ int Scene::loadCamera() {
         } else if (strcmp(tokens[0].c_str(), "FILE") == 0) {
             state.imageName = tokens[1];
         }
+        else if (strcmp(tokens[0].c_str(), "LENS_RADIUS") == 0) {
+            camera.lensRadius = atof(tokens[1].c_str());
+        }
+        else if (strcmp(tokens[0].c_str(), "FOCAL_DIST") == 0) {
+            camera.focalDistance = atof(tokens[1].c_str());
+        }
+    }
+
+    if (camera.lensRadius == 0.0f) {
+        camera.lensRadius = 0.0f;  // Pinhole by default
+    }
+    if (camera.focalDistance == 0.0f) {
+        camera.focalDistance = glm::length(camera.lookAt - camera.position);  // Default to lookAt distance
     }
 
     string line;

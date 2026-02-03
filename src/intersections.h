@@ -255,7 +255,7 @@ __device__ float triangleMeshIntersectionTest(
 	int end = start + geom.triCount;
 
 	for (int i = start; i < end; i++) {
-		//	atomicAdd(&stats->triTests, 1ULL);
+			//atomicAdd(&stats->triTests, 1ULL);
 
 		float t = triangleIntersectionTest(
 			triangles[i],
@@ -371,7 +371,7 @@ __device__ float traverseBVH(
 			int end = start + node.triCount;
 
 			for (int i = start; i < end; i++) {
-				//	atomicAdd(&stats->triTests,1ULL);
+					//atomicAdd(&stats->triTests,1ULL);
 
 				int triIdx = triIndices[i];
 				if (triIdx < 0)

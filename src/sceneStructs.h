@@ -18,9 +18,17 @@ struct AABB {
     glm::vec3 max;
 };
 
+struct Texture {
+    int width;
+    int height;
+    std::vector<glm::vec3> data;
+};;
+
 struct Triangle {
     glm::vec3 v0, v1, v2;
     glm::vec3 normal;
+	glm::vec2 uv0, uv1, uv2;
+	glm::vec4 t0, t1, t2;
 	int materialId;
 };
 
@@ -63,6 +71,8 @@ struct Camera {
     glm::vec3 right;
     glm::vec2 fov;
     glm::vec2 pixelLength;
+	float lensRadius;
+	float focalDistance;
 };
 
 struct RenderState {
@@ -87,4 +97,6 @@ struct ShadeableIntersection {
   float t;
   glm::vec3 surfaceNormal;
   int materialId;
+  glm::vec2 surfaceUV;
+  glm::vec4 surfaceTangent;
 };
