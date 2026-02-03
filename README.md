@@ -11,8 +11,8 @@ CUDA Path Tracer
 
 
 
-<img width="500" height="800" alt="cornell 2026-01-27_13-36-31z 4239samp" src="https://github.com/user-attachments/assets/5011e443-cea7-4ec1-94ea-533b080d1d6d" />
-<img width="500" height="800" alt="cornell 2026-02-02_07-47-07z 4554samp" src="https://github.com/user-attachments/assets/9422f94f-3149-4105-af1a-f134b4b7109f" />
+<img width="400" height="600" alt="cornell 2026-01-27_13-36-31z 4239samp" src="https://github.com/user-attachments/assets/5011e443-cea7-4ec1-94ea-533b080d1d6d" />
+<img width="400" height="600" alt="cornell 2026-02-02_07-47-07z 4554samp" src="https://github.com/user-attachments/assets/9422f94f-3149-4105-af1a-f134b4b7109f" />
 
 
 
