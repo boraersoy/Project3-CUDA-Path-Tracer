@@ -12,7 +12,8 @@ CUDA Path Tracer
 
 
 <img width="500" height="800" alt="cornell 2026-01-27_13-36-31z 4239samp" src="https://github.com/user-attachments/assets/5011e443-cea7-4ec1-94ea-533b080d1d6d" />
-<img width="500" height="800" alt="cornell 2026-01-31_16-51-26z 1800samp" src="https://github.com/user-attachments/assets/bed4a306-9bb4-43dc-952c-b9e8b0d7df6d" />
+<img width="500" height="800" alt="cornell 2026-02-02_07-47-07z 4554samp" src="https://github.com/user-attachments/assets/9422f94f-3149-4105-af1a-f134b4b7109f" />
+
 
 
 ### Features
@@ -37,8 +38,8 @@ CUDA Path Tracer
 
 The specular shader models perfect mirror-like reflection. Incoming rays are reflected deterministically about the surface normal, producing sharp highlights and clear reflections. No light is scattered into other directions.
 The diffuse shader models rough, matte surfaces by scattering incoming light uniformly over the hemisphere around the surface normal (Lambertian reflection). New ray directions are sampled stochastically, producing soft shading and indirect illumination.
+<img width="800" height="800" alt="cornell 2026-02-01_18-48-24z 4925samp" src="https://github.com/user-attachments/assets/1a224f6d-c088-4947-8cd8-95877b7c29d8" />
 
-<img width="800" height="800" alt="cornell 2026-01-31_16-00-34z 520samp" src="https://github.com/user-attachments/assets/c8cfa160-e93b-4479-8f3a-67d1fec8bebd" />
 
  ### Glass shader
 The glass shader models a dielectric material by splitting energy between reflection and refraction at the surface. The Fresnel term determines the probability of reflecting versus transmitting the ray, while the transmitted ray is bent according to Snell’s law.
