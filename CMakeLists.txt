@@ -87,6 +87,7 @@ set(headers
     src/objloader.h
     src/octree.h
     src/bvh.h
+    src/denoise.h
 )
 
 set(sources
@@ -108,6 +109,7 @@ set(sources
     src/objloader.cpp
     src/octree.cpp
     src/bvh.cpp
+    src/denoise.cpp
 )
 
 list(SORT headers)

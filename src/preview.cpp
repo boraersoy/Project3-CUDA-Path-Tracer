@@ -222,21 +222,50 @@ void RenderImGui()
 	// Display total iteration time
 	ImGui::Text("Total Iteration Time: %.3f ms", imguiData->TotalIterationTime);
 	ImGui::Separator();
+
+	ImGui::SliderInt("Iterations", &ui_iterations, 1, startupIterations);
+
 	
-	// Display timing for each depth level
-	ImGui::Text("Time per Depth Level:");
-	float cumulativeTime = 0.0f;
-	for (int i = 0; i < imguiData->TracedDepth; i++) {
-		cumulativeTime += imguiData->DepthTimings[i];
-		ImGui::Text("  Depth %d: %.3f ms (%.1f%% cumulative: %.3f ms)", 
-			i, 
-			imguiData->DepthTimings[i],
-			(imguiData->TotalIterationTime > 0) ? (cumulativeTime / imguiData->TotalIterationTime * 100.0f) : 0.0f,
-			cumulativeTime);
-	}
-	
+	//// Display timing for each depth level
+	//ImGui::Text("Time per Depth Level:");
+	//float cumulativeTime = 0.0f;
+	//for (int i = 0; i < imguiData->TracedDepth; i++) {
+	//	cumulativeTime += imguiData->DepthTimings[i];
+	//	ImGui::Text("  Depth %d: %.3f ms (%.1f%% cumulative: %.3f ms)", 
+	//		i, 
+	//		imguiData->DepthTimings[i],
+	//		(imguiData->TotalIterationTime > 0) ? (cumulativeTime / imguiData->TotalIterationTime * 100.0f) : 0.0f,
+	//		cumulativeTime);
+	//}
+	//
+	//ImGui::Separator();
+	//ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+	ImGui::Checkbox("Denoise", &ui_denoise);
+
+	ImGui::SliderInt("Filter Size", &ui_filterSize, 0, 100);
+	ImGui::SliderFloat("Color Weight", &ui_colorWeight, 0.0f, 1.0f);
+	ImGui::SliderFloat("Normal Weight", &ui_normalWeight, 0.0f, 1.0f);
+	ImGui::SliderFloat("Position Weight", &ui_positionWeight, 0.0f, 1.0f);
+
 	ImGui::Separator();
-	ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+
+	ImGui::Checkbox("Show GBuffer", &ui_showGbuffer);
+
+	ImGui::Separator();
+
+
+	ImGui::Checkbox("Show NBuffer", &ui_showNbuffer);
+
+	ImGui::Separator();
+
+
+	ImGui::Checkbox("Show PBuffer", &ui_showPbuffer);
+
+	ImGui::Separator();
+
+	if (ImGui::Button("Save image and exit")) {
+		ui_saveAndExit = true;
+	}
 	ImGui::End();
 
 

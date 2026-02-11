@@ -27,6 +27,21 @@ int iteration;
 int width;
 int height;
 
+//denising 
+int ui_iterations = 0;
+int startupIterations = 0;
+int lastLoopIterations = 0;
+bool ui_showGbuffer = false;
+bool ui_showNbuffer = false;
+bool ui_showPbuffer = false;
+bool ui_denoise = false;
+int ui_filterSize = 88;
+float ui_colorWeight = 0.52f;
+float ui_normalWeight = 0.17f;
+float ui_positionWeight = 0.72f;
+bool ui_saveAndExit = false;
+
+
 //-------------------------------
 //-------------MAIN--------------
 //-------------------------------
@@ -53,6 +68,10 @@ int main(int argc, char** argv) {
 	Camera& cam = renderState->camera;
 	width = cam.resolution.x;
 	height = cam.resolution.y;
+
+
+	ui_iterations = renderState->iterations;
+	startupIterations = ui_iterations;
 
 	glm::vec3 view = cam.view;
 	glm::vec3 up = cam.up;
@@ -107,6 +126,11 @@ void saveImage() {
 }
 
 void runCuda() {
+	if (lastLoopIterations != ui_iterations) {
+		lastLoopIterations = ui_iterations;
+		camchanged = true;
+	}
+
 	if (camchanged) {
 		iteration = 0;
 		Camera& cam = renderState->camera;
@@ -125,6 +149,8 @@ void runCuda() {
 		cameraPosition += cam.lookAt;
 		cam.position = cameraPosition;
 		camchanged = false;
+
+
 	}
 
 	// Map OpenGL buffer object for writing from CUDA on a single GPU
@@ -133,21 +159,84 @@ void runCuda() {
 	if (iteration == 0) {
 		pathtraceFree();
 		pathtraceInit(scene);
+
 	}
 
-	if (iteration < renderState->iterations) {
-		uchar4* pbo_dptr = NULL;
-		iteration++;
-		cudaGLMapBufferObject((void**)&pbo_dptr, pbo);
+	uchar4* pbo_dptr = NULL;
+	cudaGLMapBufferObject((void**)&pbo_dptr, pbo);
+	cudaEvent_t startPathTrace, stopPathTrace;
+	cudaEventCreate(&startPathTrace);
+	cudaEventCreate(&stopPathTrace);
 
+	if (iteration < ui_iterations) {
+		iteration++;
+		//cudaEventRecord(startPathTrace);
 		// execute the kernel
 		int frame = 0;
-		pathtrace(pbo_dptr, frame, iteration);
 
-		// unmap buffer object
-		cudaGLUnmapBufferObject(pbo);
+		pathtrace(pbo_dptr,frame, iteration);
+		//cudaEventRecord(stopPathTrace);
+		//cudaEventSynchronize(stopPathTrace);
+		//float pathTraceMs = 0;
+
+		//cudaEventElapsedTime(&pathTraceMs, startPathTrace, stopPathTrace);
+		//totalPathtraceTime += pathTraceMs;
+		//pathtraceIterationCount++;
+		//printf("Iteration %d completed in %f ms\n", iteration, pathTraceMs);
+
 	}
+
+	cudaEventDestroy(startPathTrace);
+	cudaEventDestroy(stopPathTrace);
+
+	if (ui_showGbuffer) {
+		showGBuffer(pbo_dptr);
+	}
+	else if (ui_showNbuffer) {
+		showNBuffer(pbo_dptr);
+	}
+	else if (ui_showPbuffer) {
+		showPBuffer(pbo_dptr);
+	}
+
 	else {
+		showImage(pbo_dptr, iteration);
+	}
+
+	if (iteration == ui_iterations && ui_denoise) {
+		//cudaEvent_t startDenoise, stopDenoise;
+		//cudaEventCreate(&startDenoise);
+		//cudaEventCreate(&stopDenoise);
+
+		//cudaEventRecord(startDenoise);
+
+		denoise(pbo_dptr, ui_filterSize, iteration, ui_colorWeight,
+			ui_normalWeight, ui_positionWeight);
+
+		//cudaEventRecord(stopDenoise);
+		//cudaEventSynchronize(stopDenoise);
+		//bool hasDenoised = false;
+
+		//float denoiseMs = 0;
+		//cudaEventElapsedTime(&denoiseMs, startDenoise, stopDenoise);
+		//float overheadPercent = (totalPathtraceTime > 0)
+		//	? (denoiseMs / totalPathtraceTime) * 100.0f
+		//	: 0.0f;
+
+		//printf("Denoising: %.2f ms (%.1f%% overhead of total render time)\n",
+		//	denoiseMs, overheadPercent);
+		//printf("Total pathtrace time: %.2f ms over %d iterations (avg: %.2f ms/iter)\n",
+		//	totalPathtraceTime, pathtraceIterationCount,
+		//	totalPathtraceTime / pathtraceIterationCount);
+
+
+		//cudaEventDestroy(startDenoise);
+		//cudaEventDestroy(stopDenoise);
+	}
+	// unmap buffer object
+	cudaGLUnmapBufferObject(pbo);
+
+	if (ui_saveAndExit) {
 		saveImage();
 		pathtraceFree();
 		cudaDeviceReset();

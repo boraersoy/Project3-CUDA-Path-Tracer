@@ -20,6 +20,7 @@
 #include "bvh.h"
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
+#include "denoise.h"
 
 #define ERRORCHECK 1
 
@@ -28,7 +29,7 @@
 
 
 #define SORT_BY_MATERIAL 0
-#define CACHE_FIRST_BOUNCE 1
+#define CACHE_FIRST_BOUNCE 0
 #define BBVH 0
 #define AntiAliasing 0
 
@@ -143,6 +144,23 @@ int* dev_triIndices = nullptr;
 BVHTraverseStats* dev_bvhStats = nullptr;
 
 
+//denoising
+static GBufferPixel* dev_gBuffer = NULL;
+static glm::ivec2* dev_offset = NULL;
+static float* dev_kernel = NULL;
+static glm::vec3* dev_denoiseBufferIn = NULL;
+static glm::vec3* dev_denoiseBufferOut = NULL;
+
+glm::ivec2 offset[25];
+const float kernel[25] = {
+	1.f / 256, 1.f / 64, 3.f / 128, 1.f / 64, 1.f / 256,
+	1.f / 64, 1.f / 16, 3.f / 32, 1.f / 16, 1.f / 64,
+	3.f / 128, 3.f / 32, 9.f / 64, 3.f / 32, 3.f / 128,
+	1.f / 64, 1.f / 16, 3.f / 32, 1.f / 16, 1.f / 64,
+	1.f / 256, 1.f / 64, 3.f / 128, 1.f / 64, 1.f / 256
+};
+
+
 
 
 #if CACHE_FIRST_BOUNCE
@@ -224,6 +242,26 @@ void pathtraceInit(Scene* scene) {
 	);
 #endif BBVH
 	cudaMalloc(&dev_bvhStats, sizeof(BVHTraverseStats));
+
+	//denoising
+	cudaMalloc(&dev_gBuffer, pixelcount * sizeof(GBufferPixel));
+
+
+
+	// TODO: initialize any extra device memeory you need
+	cudaMalloc(&dev_denoiseBufferIn, pixelcount * sizeof(glm::vec3));
+	cudaMalloc(&dev_denoiseBufferOut, pixelcount * sizeof(glm::vec3));
+	cudaMalloc(&dev_offset, 25 * sizeof(glm::ivec2));
+	for (int i = 0, int y = 0; y < 5; ++y) { // read array from left to right, top to bottom
+		for (int x = 0; x < 5; ++x) {
+			offset[i++] = glm::ivec2(x - 2, y - 2);
+		}
+	}
+	cudaMemcpy(dev_offset, offset, 25 * sizeof(glm::ivec2), cudaMemcpyHostToDevice);
+
+	cudaMalloc(&dev_kernel, 25 * sizeof(float));
+	cudaMemcpy(dev_kernel, kernel, 25 * sizeof(float), cudaMemcpyHostToDevice);
+
 	checkCUDAError("pathtraceInit");
 }
 
@@ -247,6 +285,12 @@ void pathtraceFree() {
 	cudaFree(dev_triIndices);
 #endif
 
+	//denoising
+	cudaFree(dev_gBuffer);
+	cudaFree(dev_denoiseBufferIn);
+	cudaFree(dev_denoiseBufferOut);
+	cudaFree(dev_offset);
+	cudaFree(dev_kernel);
 	checkCUDAError("pathtraceFree");
 }
 
@@ -440,6 +484,215 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
 }
 
 
+__global__ void generateGBuffer(
+	int num_paths,
+	ShadeableIntersection* shadeableIntersections,
+	PathSegment* pathSegments,
+	GBufferPixel* gBuffer) {
+	int idx = blockIdx.x * blockDim.x + threadIdx.x;
+	if (idx < num_paths)
+	{
+		auto& intersect = shadeableIntersections[idx];
+		gBuffer[idx].t = intersect.t;
+		gBuffer[idx].normal = intersect.surfaceNormal;
+		gBuffer[idx].position = intersect.t *
+			pathSegments[idx].ray.direction + pathSegments[idx].ray.origin;
+	}
+}
+
+__global__ void gbufferToPBO(uchar4* pbo, glm::ivec2 resolution, GBufferPixel* gBuffer) {
+	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+
+	if (x < resolution.x && y < resolution.y) {
+		int index = x + (y * resolution.x);
+		float timeToIntersect = gBuffer[index].t * 256.0;
+
+		pbo[index].w = 0;
+		pbo[index].x = timeToIntersect;
+		pbo[index].y = timeToIntersect;
+		pbo[index].z = timeToIntersect;
+	}
+}
+
+__global__ void nbufferToPBO(uchar4* pbo, glm::ivec2 resolution, GBufferPixel* gBuffer) {
+	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+	if (x < resolution.x && y < resolution.y) {
+		int index = x + (y * resolution.x);
+		glm::vec3 normal = gBuffer[index].normal;
+		glm::vec3 normalized = glm::clamp(glm::abs(256.f * normal), 0.f, 255.f);
+		uchar4 color = make_uchar4(normalized.x, normalized.y, normalized.z, 0);
+		pbo[index].w = 0;
+		pbo[index].x = color.x;
+		pbo[index].y = color.y;
+		pbo[index].z = color.z;
+	}
+}
+
+__global__ void pbufferToPBO(uchar4* pbo, glm::ivec2 resolution, GBufferPixel* gBuffer) {
+	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+	if (x < resolution.x && y < resolution.y) {
+		int index = x + (y * resolution.x);
+		glm::vec3 position = gBuffer[index].position;
+		glm::vec3 normalized = glm::clamp(glm::abs(256.f * position * 0.1f), 0.f, 255.f);
+		uchar4 color = make_uchar4(normalized.x, normalized.y, normalized.z, 0);
+		pbo[index].w = 0;
+		pbo[index].x = color.x;
+		pbo[index].y = color.y;
+		pbo[index].z = color.z;
+	}
+}
+
+// CHECKITOUT: this kernel "post-processes" the gbuffer/gbuffers into something that you can visualize for debugging.
+void showGBuffer(uchar4* pbo) {
+	const Camera& cam = hst_scene->state.camera;
+	const dim3 blockSize2d(8, 8);
+	const dim3 blocksPerGrid2d(
+		(cam.resolution.x + blockSize2d.x - 1) / blockSize2d.x,
+		(cam.resolution.y + blockSize2d.y - 1) / blockSize2d.y);
+
+	// CHECKITOUT: process the gbuffer results and send them to OpenGL buffer for visualization
+	gbufferToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, dev_gBuffer);
+}
+
+void showNBuffer(uchar4* pbo) {
+	const Camera& cam = hst_scene->state.camera;
+	const dim3 blockSize2d(8, 8);
+	const dim3 blocksPerGrid2d(
+		(cam.resolution.x + blockSize2d.x - 1) / blockSize2d.x,
+		(cam.resolution.y + blockSize2d.y - 1) / blockSize2d.y);
+	// CHECKITOUT: process the gbuffer results and send them to OpenGL buffer for visualization
+	nbufferToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, dev_gBuffer);
+}
+
+void showPBuffer(uchar4* pbo) {
+	const Camera& cam = hst_scene->state.camera;
+	const dim3 blockSize2d(8, 8);
+	const dim3 blocksPerGrid2d(
+		(cam.resolution.x + blockSize2d.x - 1) / blockSize2d.x,
+		(cam.resolution.y + blockSize2d.y - 1) / blockSize2d.y);
+	// CHECKITOUT: process the gbuffer results and send them to OpenGL buffer for visualization
+	pbufferToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, dev_gBuffer);
+}
+
+__global__ void kernInitDenoiseBuffer(glm::vec3* image, glm::ivec2 resolution, float iter, glm::vec3* inputImage) {
+	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+	if ((x < resolution.x && y < resolution.y)) {
+		int index = x + (y * resolution.x);
+		inputImage[index] = image[index] / iter;
+	}
+}
+__device__ __forceinline__ float getWeight(glm::vec3 v1, glm::vec3 v2, float sigma) {
+	glm::vec3 t = v1 - v2;
+	float dist_squared = glm::dot(t, t);
+	return glm::min(exp(-dist_squared / (sigma * sigma)), 1.0f);
+}
+__global__ void atrousFilter(
+	glm::vec3* inputImage,
+	GBufferPixel* gBuffer,
+	glm::ivec2 resolution,
+	int stepWidth,
+	float c_phi,
+	float n_phi,
+	float p_phi,
+	const float* kernel,
+	const glm::ivec2* offset,
+	glm::vec3* outputImage
+
+) {
+	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+
+	if (x < resolution.x && y < resolution.y) {
+		int index = x + (y * resolution.x);
+		auto& color = inputImage[index];
+		auto& position = gBuffer[index].position;
+		auto& normal = gBuffer[index].normal;
+
+		glm::vec3 sum = glm::vec3(0.0f);
+		float cum_w = 0.0f;
+
+		for (int i = 0; i < 25; i++) {
+			glm::ivec2 uv = glm::ivec2(x, y) + offset[i] * stepWidth;
+
+			// Clamp to image boundaries
+			uv.x = glm::clamp(uv.x, 0, resolution.x - 1);
+			uv.y = glm::clamp(uv.y, 0, resolution.y - 1);
+
+			int uv1d = uv.x + uv.y * resolution.x;
+
+			auto& neighbor_color = inputImage[uv1d];
+			auto& neighbor_position = gBuffer[uv1d].position;
+			auto& neighbor_normal = gBuffer[uv1d].normal;
+
+			// Calculate edge-aware weights (or skip if sigma is 0)
+			float c_w = (c_phi > 0.0f) ? getWeight(color, neighbor_color, c_phi) : 1.0f;
+			float n_w = (n_phi > 0.0f) ? getWeight(normal, neighbor_normal, n_phi) : 1.0f;
+			float p_w = (p_phi > 0.0f) ? getWeight(position, neighbor_position, p_phi) : 1.0f;
+
+			float weight = c_w * n_w * p_w * kernel[i];
+			sum += weight * neighbor_color;
+			cum_w += weight;
+		}
+		outputImage[index] = sum / cum_w;
+
+	}
+}
+
+void denoise(uchar4* image, int filterSize, int iter, float c_phi,
+	float n_phi, float p_phi) {
+	const Camera& cam = hst_scene->state.camera;
+	glm::vec2 resolution = cam.resolution;
+	const dim3 blockSize2d(8, 8);
+	const dim3 blocksPerGrid2d(
+		(resolution.x + blockSize2d.x - 1) / blockSize2d.x,
+		(resolution.y + blockSize2d.y - 1) / blockSize2d.y);
+
+	const int pixelcount = resolution.x * resolution.y;
+
+	// Copy input image to buffer A (normalized by iteration count)
+	kernInitDenoiseBuffer << <blocksPerGrid2d, blockSize2d >> > (dev_image, resolution, iter, dev_denoiseBufferIn);
+
+
+	//number of iterations
+	int numIterations = glm::clamp(filterSize / 20, 1, 5);
+	// Apply A-trous filter multiple times with increasing step size
+	for (int i = 0; i < numIterations; i++) {
+		int stepWidth = 1 << i;  // 2^i: 1, 2, 4, 8, 16...
+
+		atrousFilter << <blocksPerGrid2d, blockSize2d >> > (dev_denoiseBufferIn, dev_gBuffer, resolution,
+			stepWidth, c_phi, n_phi, p_phi, dev_kernel, dev_offset, dev_denoiseBufferOut);
+		cudaDeviceSynchronize();
+		checkCUDAError("atrous filter iteration");
+
+		// Swap buffers for next iteration
+		std::swap(dev_denoiseBufferIn, dev_denoiseBufferOut);
+	}
+
+	// Copy result back to dev_image (with iteration scaling for display)
+	//cudaMemcpy(dev_image, dev_denoiseBufferIn, pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToDevice);
+	sendImageToPBO << <blocksPerGrid2d, blockSize2d >> > (image, resolution, 1, dev_denoiseBufferIn);
+}
+
+void showImage(uchar4* pbo, int iter) {
+	const Camera& cam = hst_scene->state.camera;
+	const dim3 blockSize2d(8, 8);
+	const dim3 blocksPerGrid2d(
+		(cam.resolution.x + blockSize2d.x - 1) / blockSize2d.x,
+		(cam.resolution.y + blockSize2d.y - 1) / blockSize2d.y);
+
+	// Send results to OpenGL buffer for rendering
+	sendImageToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, iter, dev_image);
+
+}
+
+
+
+
+
 
 /**
  * Wrapper for the __global__ call that sets up the kernel calls and does a ton
@@ -586,6 +839,9 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 #endif
 		checkCUDAError("trace one bounce");
 		cudaDeviceSynchronize();
+		if (depth == 0) {
+			generateGBuffer << <numblocksPathSegmentTracing, blockSize1d >> > (num_paths, dev_intersections, dev_paths, dev_gBuffer);
+		}
 		depth++;
 		//print the bvh traversal stats
 		BVHTraverseStats hst_bvhStats;
@@ -709,11 +965,12 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 		guiData->TotalIterationTime = iterationDuration.count();
 	}
 	
-	// Print total iteration timing summary to console
-	printf("----------------------------------------\n");
-	printf("Iteration %d complete: Total time = %.3f ms\n", iter, iterationDuration.count());
-	printf("----------------------------------------\n\n");
+	//// Print total iteration timing summary to console
+	//printf("----------------------------------------\n");
+	//printf("Iteration %d complete: Total time = %.3f ms\n", iter, iterationDuration.count());
+	//printf("----------------------------------------\n\n");
 
 	checkCUDAError("pathtrace");
 
 }
+
